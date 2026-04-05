@@ -14,9 +14,9 @@ export const BOILERPLATE: Record<Language, string> = {
 };
 
 export const LANGUAGE_LABELS: Record<Language, string> = {
-	python: 'Python',
-	typescript: 'TypeScript (Deno)',
-	clojure: 'Clojure'
+	python: 'Python 3.13',
+	typescript: 'TypeScript (Deno 2)',
+	clojure: 'Clojure 1.12'
 };
 
 export const LANGUAGE_ABBR: Record<Language, string> = {

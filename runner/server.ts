@@ -108,7 +108,7 @@ function spawnWithTimeout(
 			? `runsc --rootless --platform=ptrace do -- sh -c ${JSON.stringify(cmd)}`
 			: cmd;
 
-		const fullCmd = `ulimit -v 262144; ulimit -t 25; ${sandboxedCmd}`;
+		const fullCmd = `ulimit -t 25; ${sandboxedCmd}`;
 
 		const proc = spawn('sh', ['-c', fullCmd], {
 			cwd,

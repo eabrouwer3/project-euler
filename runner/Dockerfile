@@ -2,11 +2,13 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Base tools + Java
+# Base tools + OpenJDK 21
 RUN apt-get update && apt-get install -y \
     curl wget ca-certificates gnupg unzip \
-    default-jdk \
-    python3 python3-pip \
+    openjdk-21-jdk \
+    python3.13 python3-pip \
+    && ln -sf /usr/bin/python3.13 /usr/bin/python \
+    && ln -sf /usr/bin/python3.13 /usr/bin/python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Node 22
@@ -14,10 +16,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Deno
-RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+# Deno 2
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local DENO_VERSION=v2.3.3 sh
 
-# Clojure CLI
+# Clojure 1.12 CLI
 RUN curl -fsSL https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh -o /tmp/clj-install.sh \
     && chmod +x /tmp/clj-install.sh \
     && /tmp/clj-install.sh \
