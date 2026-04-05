@@ -7,8 +7,9 @@
 
 	let {
 		problems,
-		solutionSummaries = []
-	}: { problems: Problem[]; solutionSummaries: SolutionSummary[] } = $props();
+		solutionSummaries = [],
+		width = 256
+	}: { problems: Problem[]; solutionSummaries: SolutionSummary[]; width?: number } = $props();
 
 	let filter = $state<FilterOption>('all');
 
@@ -44,7 +45,7 @@
 	];
 </script>
 
-<aside class="flex h-full w-64 shrink-0 flex-col border-r border-border bg-card">
+<aside style="width: {width}px" class="flex h-full shrink-0 flex-col border-r border-border bg-card">
 	<div class="border-b border-border px-4 py-3">
 		<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
 			Problems

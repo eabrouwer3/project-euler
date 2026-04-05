@@ -33,8 +33,8 @@
 	const hasOutput = $derived(stdout || stderr || error);
 </script>
 
-<div class="flex flex-col gap-2 border-t border-border p-3">
-	<div class="flex items-center justify-between">
+<div class="flex flex-1 flex-col gap-2 overflow-hidden border-t border-border p-3">
+	<div class="flex shrink-0 items-center justify-between">
 		<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Output</span>
 		<Button onclick={run} disabled={running || disabled} size="sm" class="h-7 text-xs">
 			{#if running}
@@ -50,7 +50,7 @@
 	</div>
 
 	{#if hasOutput}
-		<div class="max-h-48 overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs">
+		<div class="flex-1 overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs">
 			{#if stdout}
 				<pre class="whitespace-pre-wrap text-green-400">{stdout}</pre>
 			{/if}

@@ -14,6 +14,24 @@
 	import type { LayoutData } from './$types.js';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
+
+	let sidebarWidth = $state(256);
+
+	function startSidebarResize(e: MouseEvent) {
+		const startX = e.clientX;
+		const startWidth = sidebarWidth;
+		document.body.style.userSelect = 'none';
+		const onMove = (e: MouseEvent) => {
+			sidebarWidth = Math.max(140, Math.min(400, startWidth + e.clientX - startX));
+		};
+		const onUp = () => {
+			document.body.style.userSelect = '';
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+		};
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
+	}
 </script>
 
 <div class="flex h-screen flex-col overflow-hidden">
@@ -58,7 +76,13 @@
 
 	<!-- Body: sidebar + main -->
 	<div class="flex flex-1 overflow-hidden">
-		<ProblemSidebar problems={data.problems} solutionSummaries={data.solutionSummaries} />
+		<ProblemSidebar problems={data.problems} solutionSummaries={data.solutionSummaries} width={sidebarWidth} />
+		<div
+			class="w-1 shrink-0 cursor-col-resize transition-colors hover:bg-primary/30"
+			onmousedown={startSidebarResize}
+			role="separator"
+			aria-label="Resize sidebar"
+		></div>
 		<main class="flex flex-1 overflow-hidden">
 			{@render children()}
 		</main>

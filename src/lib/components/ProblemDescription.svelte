@@ -2,7 +2,7 @@
 	import renderMathInElement from 'katex/contrib/auto-render';
 	import 'katex/dist/katex.min.css';
 
-	let { html }: { html: string } = $props();
+	let { html, width = 320 }: { html: string; width?: number } = $props();
 
 	let container: HTMLDivElement | undefined = $state();
 
@@ -20,7 +20,7 @@
 	});
 </script>
 
-<aside class="flex h-full w-80 shrink-0 flex-col border-l border-border bg-card xl:w-96">
+<aside style="width: {width}px" class="flex h-full shrink-0 flex-col border-l border-border bg-card">
 	<div class="border-b border-border px-4 py-3">
 		<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
 			Problem

@@ -16,6 +16,40 @@
 	let status = $state(data.status);
 	let saveTimer: ReturnType<typeof setTimeout> | undefined;
 	let saveStatus = $state<'saved' | 'saving' | ''>('');
+	let problemWidth = $state(320);
+	let outputHeight = $state(220);
+
+	function startProblemResize(e: MouseEvent) {
+		const startX = e.clientX;
+		const startWidth = problemWidth;
+		document.body.style.userSelect = 'none';
+		const onMove = (e: MouseEvent) => {
+			problemWidth = Math.max(200, Math.min(600, startWidth - (e.clientX - startX)));
+		};
+		const onUp = () => {
+			document.body.style.userSelect = '';
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+		};
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
+	}
+
+	function startOutputResize(e: MouseEvent) {
+		const startY = e.clientY;
+		const startHeight = outputHeight;
+		document.body.style.userSelect = 'none';
+		const onMove = (e: MouseEvent) => {
+			outputHeight = Math.max(80, Math.min(600, startHeight - (e.clientY - startY)));
+		};
+		const onUp = () => {
+			document.body.style.userSelect = '';
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+		};
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
+	}
 
 	// Reset local state when navigating to a different problem/language
 	afterNavigate(() => {
@@ -114,12 +148,26 @@
 		</div>
 
 		<!-- Bottom panels -->
-		<div class="shrink-0 border-t border-border">
+		<div style="height: {outputHeight}px" class="flex shrink-0 flex-col border-t border-border">
+			<div
+				class="h-1 shrink-0 cursor-row-resize transition-colors hover:bg-primary/30"
+				onmousedown={startOutputResize}
+				role="separator"
+				aria-label="Resize output panel"
+			></div>
 			<PackageInput bind:packages onchange={(pkgs) => scheduleAutosave(code, pkgs)} />
 			<RunOutput onrun={runSolution} disabled={saveStatus === 'saving'} />
 		</div>
 	</div>
 
+	<!-- Resize handle -->
+	<div
+		class="w-1 shrink-0 cursor-col-resize transition-colors hover:bg-primary/30"
+		onmousedown={startProblemResize}
+		role="separator"
+		aria-label="Resize problem panel"
+	></div>
+
 	<!-- Problem description -->
-	<ProblemDescription html={data.problemHtml} />
+	<ProblemDescription html={data.problemHtml} width={problemWidth} />
 </div>
