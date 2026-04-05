@@ -11,35 +11,27 @@ export const POST: RequestHandler = async (event) => {
 	const session = await event.locals.auth();
 	if (!session?.user?.id) error(401, 'Unauthorized');
 
-	const { problemId, language, code, packages } = (await event.request.json()) as {
+	const { problemId, language } = (await event.request.json()) as {
 		problemId: number;
 		language: Language;
-		code?: string;
-		packages?: string[];
 	};
 
 	if (!problemId || !language) error(400, 'Missing required fields');
 
-	// Use provided code/packages, or fall back to DB, or boilerplate
-	let runCodeStr = code;
-	let runPackages = packages ?? [];
-
-	if (runCodeStr === undefined) {
-		const saved = await db
-			.select()
-			.from(solutions)
-			.where(
-				and(
-					eq(solutions.userId, session.user.id),
-					eq(solutions.problemId, problemId),
-					eq(solutions.language, language)
-				)
+	const saved = await db
+		.select()
+		.from(solutions)
+		.where(
+			and(
+				eq(solutions.userId, session.user.id),
+				eq(solutions.problemId, problemId),
+				eq(solutions.language, language)
 			)
-			.limit(1);
+		)
+		.limit(1);
 
-		runCodeStr = saved[0]?.code ?? BOILERPLATE[language];
-		runPackages = (saved[0]?.packages as string[]) ?? [];
-	}
+	const runCodeStr = saved[0]?.code ?? BOILERPLATE[language];
+	const runPackages = (saved[0]?.packages as string[]) ?? [];
 
 	try {
 		const result = await runCode(language, runCodeStr, runPackages);

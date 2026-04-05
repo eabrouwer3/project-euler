@@ -1,4 +1,9 @@
 services:
+  runner:
+    build: ./runner
+    ports:
+      - "3001:3001"
+
   postgres:
     image: postgres:16
     environment:

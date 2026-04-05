@@ -2,9 +2,11 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 
 	let {
-		onrun
+		onrun,
+		disabled = false
 	}: {
 		onrun: () => Promise<{ stdout: string; stderr: string }>;
+		disabled?: boolean;
 	} = $props();
 
 	let running = $state(false);
@@ -34,7 +36,7 @@
 <div class="flex flex-col gap-2 border-t border-border p-3">
 	<div class="flex items-center justify-between">
 		<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Output</span>
-		<Button onclick={run} disabled={running} size="sm" class="h-7 text-xs">
+		<Button onclick={run} disabled={running || disabled} size="sm" class="h-7 text-xs">
 			{#if running}
 				<svg class="mr-1.5 h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
 					<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />

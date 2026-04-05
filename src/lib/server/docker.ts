@@ -5,12 +5,23 @@ import { join } from 'path';
 import type { Language } from '$lib/types.js';
 
 const TIMEOUT_MS = 30_000;
+const RUNNER_URL = process.env.RUNNER_URL;
 
 export async function runCode(
 	language: Language,
 	code: string,
 	packages: string[]
 ): Promise<{ stdout: string; stderr: string }> {
+	if (RUNNER_URL) {
+		const res = await fetch(`${RUNNER_URL}/run`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ language, code, packages }),
+			signal: AbortSignal.timeout(35_000)
+		});
+		return res.json();
+	}
+
 	const dir = await mkdtemp(join(tmpdir(), 'euler-'));
 
 	try {
@@ -88,7 +99,7 @@ async function writeFiles(
 
 function execDocker(args: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn('docker', args);
+		const proc = spawn('docker', args, { env: process.env });
 		let stdout = '';
 		let stderr = '';
 
