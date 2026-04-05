@@ -11,6 +11,8 @@ export const load: LayoutServerLoad = async (event) => {
 	const [session, problems] = await Promise.all([event.locals.auth(), getAllProblems()]);
 	if (!session) redirect(302, '/login');
 
+	event.depends('app:solutions');
+
 	const rows = await db
 		.select({ problemId: solutions.problemId, language: solutions.language, status: solutions.status, code: solutions.code })
 		.from(solutions)

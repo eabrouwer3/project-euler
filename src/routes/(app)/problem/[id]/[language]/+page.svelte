@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, invalidate } from '$app/navigation';
 	import { page } from '$app/stores';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import LanguageSelector from '$lib/components/LanguageSelector.svelte';
@@ -49,6 +49,7 @@
 			});
 			saveStatus = 'saved';
 			setTimeout(() => (saveStatus = ''), 2000);
+			invalidate('app:solutions');
 		} catch {
 			saveStatus = '';
 		}
@@ -62,6 +63,7 @@
 			body: JSON.stringify({ problemId: data.problemId, language: data.language, status: newStatus })
 		});
 		status = newStatus;
+		invalidate('app:solutions');
 	}
 
 	async function runSolution() {
