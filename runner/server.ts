@@ -63,11 +63,10 @@ async function execCode(
 	switch (language) {
 		case 'python': {
 			await writeFile(join(dir, 'main.py'), code);
-			await writeFile(join(dir, 'requirements.txt'), packages.join('\n'));
-			cmd =
-				packages.length > 0
-					? 'pip install -r requirements.txt -q && python main.py'
-					: 'python main.py';
+			const withFlags = packages.map((p) => `--with ${p}`).join(' ');
+			cmd = packages.length > 0
+				? `uv run --python 3.13 ${withFlags} main.py`
+				: 'uv run --python 3.13 main.py';
 			break;
 		}
 		case 'typescript': {

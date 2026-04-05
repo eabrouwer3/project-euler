@@ -6,9 +6,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     curl wget ca-certificates gnupg unzip \
     openjdk-21-jdk \
-    python3 python3-pip \
-    && ln -sf /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
+
+# uv + Python 3.13
+RUN curl -fsSL https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+RUN uv python install 3.13
 
 # Node 22
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
