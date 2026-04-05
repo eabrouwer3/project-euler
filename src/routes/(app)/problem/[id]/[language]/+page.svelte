@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto, invalidate, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { browser } from '$app/environment';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import LanguageSelector from '$lib/components/LanguageSelector.svelte';
 	import PackageInput from '$lib/components/PackageInput.svelte';
@@ -16,8 +17,11 @@
 	let status = $state(data.status);
 	let saveTimer: ReturnType<typeof setTimeout> | undefined;
 	let saveStatus = $state<'saved' | 'saving' | ''>('');
-	let problemWidth = $state(320);
-	let outputHeight = $state(220);
+	let problemWidth = $state(browser ? (Number(localStorage.getItem('problem-width')) || 320) : 320);
+	let outputHeight = $state(browser ? (Number(localStorage.getItem('output-height')) || 220) : 220);
+
+	$effect(() => { localStorage.setItem('problem-width', String(problemWidth)); });
+	$effect(() => { localStorage.setItem('output-height', String(outputHeight)); });
 
 	function startProblemResize(e: MouseEvent) {
 		const startX = e.clientX;

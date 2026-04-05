@@ -65,4 +65,10 @@
 		margin: 0.75rem 0;
 		color: hsl(var(--muted-foreground));
 	}
+	.problem-content :global(.monospace) {
+		font-family: monospace;
+	}
+	.problem-content :global(.center) {
+		text-align: center;
+	}
 </style>

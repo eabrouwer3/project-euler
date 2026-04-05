@@ -11,11 +11,14 @@
 	} from '$lib/components/ui/dropdown-menu/index.js';
 	import { Moon, Sun } from '@lucide/svelte';
 	import { toggleMode, mode } from 'mode-watcher';
+	import { browser } from '$app/environment';
 	import type { LayoutData } from './$types.js';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
 
-	let sidebarWidth = $state(256);
+	let sidebarWidth = $state(browser ? (Number(localStorage.getItem('sidebar-width')) || 256) : 256);
+
+	$effect(() => { localStorage.setItem('sidebar-width', String(sidebarWidth)); });
 
 	function startSidebarResize(e: MouseEvent) {
 		const startX = e.clientX;
