@@ -6,13 +6,14 @@
 	import PackageInput from '$lib/components/PackageInput.svelte';
 	import ProblemDescription from '$lib/components/ProblemDescription.svelte';
 	import RunOutput from '$lib/components/RunOutput.svelte';
-	import type { Language } from '$lib/types.js';
+	import type { Language, SolutionStatus } from '$lib/types.js';
 	import type { PageData } from './$types.js';
 
 	let { data }: { data: PageData } = $props();
 
 	let code = $state(data.code);
 	let packages = $state(data.packages);
+	let status = $state(data.status);
 	let saveTimer: ReturnType<typeof setTimeout> | undefined;
 	let saveStatus = $state<'saved' | 'saving' | ''>('');
 
@@ -20,6 +21,7 @@
 	$effect(() => {
 		code = data.code;
 		packages = data.packages;
+		status = data.status;
 	});
 
 	function onLanguageChange(lang: Language) {
@@ -50,6 +52,16 @@
 		} catch {
 			saveStatus = '';
 		}
+	}
+
+	async function toggleStatus() {
+		const newStatus: SolutionStatus = status === 'solved' ? 'in_progress' : 'solved';
+		await fetch('/api/solutions', {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ problemId: data.problemId, language: data.language, status: newStatus })
+		});
+		status = newStatus;
 	}
 
 	async function runSolution() {
@@ -83,6 +95,16 @@
 				<span class="ml-auto text-xs text-muted-foreground">
 					<a href="/login" class="underline">Sign in</a> to save progress
 				</span>
+			{:else if status !== null}
+				<button
+					onclick={toggleStatus}
+					class="ml-auto rounded px-2 py-1 text-xs transition-colors
+						{status === 'solved'
+						? 'bg-green-500/20 text-green-600 hover:bg-green-500/30 dark:text-green-400'
+						: 'text-muted-foreground hover:text-foreground'}"
+				>
+					{status === 'solved' ? '✓ Solved' : 'Mark solved'}
+				</button>
 			{/if}
 		</div>
 

@@ -21,12 +21,14 @@ export const solutions = pgTable(
 		language: text('language').notNull(),
 		code: text('code').notNull().default(''),
 		packages: jsonb('packages').$type<string[]>().notNull().default([]),
+		status: text('status').notNull().default('in_progress'),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 		updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 	},
 	(t) => [
 		unique().on(t.userId, t.problemId, t.language),
-		check('language_check', sql`${t.language} IN ('python', 'typescript', 'clojure')`)
+		check('language_check', sql`${t.language} IN ('python', 'typescript', 'clojure')`),
+		check('status_check', sql`${t.status} IN ('in_progress', 'solved')`)
 	]
 );
 

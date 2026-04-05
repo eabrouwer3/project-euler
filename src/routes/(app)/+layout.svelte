@@ -48,7 +48,7 @@
 
 	<!-- Body: sidebar + main -->
 	<div class="flex flex-1 overflow-hidden">
-		<ProblemSidebar problems={data.problems} />
+		<ProblemSidebar problems={data.problems} solutionSummaries={data.solutionSummaries} />
 		<main class="flex flex-1 overflow-hidden">
 			{@render children()}
 		</main>

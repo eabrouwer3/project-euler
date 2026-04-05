@@ -5,7 +5,7 @@ import { solutions } from '../../../../../../drizzle/schema.js';
 import { and, eq } from 'drizzle-orm';
 import { LANGUAGES, BOILERPLATE } from '$lib/constants.js';
 import type { PageServerLoad } from './$types.js';
-import type { Language } from '$lib/types.js';
+import type { Language, SolutionStatus } from '$lib/types.js';
 
 export const load: PageServerLoad = async (event) => {
 	const problemId = parseInt(event.params.id, 10);
@@ -39,6 +39,7 @@ export const load: PageServerLoad = async (event) => {
 		language,
 		problemHtml,
 		code: savedSolution?.code ?? BOILERPLATE[language],
-		packages: (savedSolution?.packages as string[]) ?? []
+		packages: (savedSolution?.packages as string[]) ?? [],
+		status: (savedSolution?.status as SolutionStatus) ?? null
 	};
 };

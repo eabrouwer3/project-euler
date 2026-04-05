@@ -19,6 +19,12 @@ export const LANGUAGE_LABELS: Record<Language, string> = {
 	clojure: 'Clojure'
 };
 
+export const LANGUAGE_ABBR: Record<Language, string> = {
+	python: 'PY',
+	typescript: 'TS',
+	clojure: 'CLJ'
+};
+
 export const MONACO_LANGUAGE: Record<Language, string> = {
 	python: 'python',
 	typescript: 'typescript',
