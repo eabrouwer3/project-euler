@@ -6,9 +6,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     curl wget ca-certificates gnupg unzip \
     openjdk-21-jdk \
-    python3.13 python3-pip \
-    && ln -sf /usr/bin/python3.13 /usr/bin/python \
-    && ln -sf /usr/bin/python3.13 /usr/bin/python3 \
+    python3 python3-pip \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
 # Node 22
