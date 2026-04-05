@@ -34,7 +34,7 @@ RUN curl -fsSL https://gvisor.dev/archive.key | gpg --dearmor -o /usr/share/keyr
 RUN mkdir -p /tmp/clj-warmup \
     && echo '(println "warmed")' > /tmp/clj-warmup/main.clj \
     && echo '{:deps {}}' > /tmp/clj-warmup/deps.edn \
-    && cd /tmp/clj-warmup && clj -M main.clj \
+    && cd /tmp/clj-warmup && clojure -M main.clj \
     && rm -rf /tmp/clj-warmup
 
 WORKDIR /app

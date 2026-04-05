@@ -91,7 +91,7 @@ async function execCode(
 					.map(([k, v]) => `${k} ${JSON.stringify(v)}`)
 					.join(' ')}}}`
 			);
-			cmd = 'clj -M main.clj';
+			cmd = 'clojure -M main.clj';
 			break;
 		}
 	}
