@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto, invalidate } from '$app/navigation';
+	import { goto, invalidate, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import LanguageSelector from '$lib/components/LanguageSelector.svelte';
@@ -18,7 +18,7 @@
 	let saveStatus = $state<'saved' | 'saving' | ''>('');
 
 	// Reset local state when navigating to a different problem/language
-	$effect(() => {
+	afterNavigate(() => {
 		code = data.code;
 		packages = data.packages;
 		status = data.status;
@@ -72,9 +72,7 @@
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				problemId: data.problemId,
-				language: data.language,
-				code,
-				packages
+				language: data.language
 			})
 		});
 		if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -97,7 +95,7 @@
 				<span class="ml-auto text-xs text-muted-foreground">
 					<a href="/login" class="underline">Sign in</a> to save progress
 				</span>
-			{:else if status !== null}
+			{:else}
 				<button
 					onclick={toggleStatus}
 					class="ml-auto rounded px-2 py-1 text-xs transition-colors
@@ -118,7 +116,7 @@
 		<!-- Bottom panels -->
 		<div class="shrink-0 border-t border-border">
 			<PackageInput bind:packages onchange={(pkgs) => scheduleAutosave(code, pkgs)} />
-			<RunOutput onrun={runSolution} />
+			<RunOutput onrun={runSolution} disabled={saveStatus === 'saving'} />
 		</div>
 	</div>
 

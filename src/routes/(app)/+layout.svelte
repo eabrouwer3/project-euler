@@ -9,6 +9,8 @@
 		DropdownMenuItem,
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu/index.js';
+	import { Moon, Sun } from '@lucide/svelte';
+	import { toggleMode, mode } from 'mode-watcher';
 	import type { LayoutData } from './$types.js';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
@@ -19,7 +21,15 @@
 	<header class="flex h-12 shrink-0 items-center justify-between border-b border-border bg-card px-4">
 		<a href="/problem/1" class="text-sm font-semibold tracking-tight">Project Euler Portal</a>
 
-		<div>
+		<div class="flex items-center gap-2">
+			<button onclick={toggleMode} class="text-muted-foreground hover:text-foreground" aria-label="Toggle theme">
+				{#if mode.current === 'dark'}
+					<Sun size={16} />
+				{:else}
+					<Moon size={16} />
+				{/if}
+			</button>
+
 			{#if data.session?.user}
 				<DropdownMenu>
 					<DropdownMenuTrigger>

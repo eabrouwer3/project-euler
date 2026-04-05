@@ -2,6 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db.js';
 import { solutions } from '../../../../drizzle/schema.js';
 import { and, eq } from 'drizzle-orm';
+import { BOILERPLATE } from '$lib/constants.js';
 import type { RequestHandler } from './$types.js';
 import type { Language, SolutionStatus } from '$lib/types.js';
 
@@ -72,15 +73,20 @@ export const PATCH: RequestHandler = async (event) => {
 	if (!problemId || !language || !status) error(400, 'Missing required fields');
 
 	await db
-		.update(solutions)
-		.set({ status, updatedAt: new Date() })
-		.where(
-			and(
-				eq(solutions.userId, session.user.id),
-				eq(solutions.problemId, problemId),
-				eq(solutions.language, language)
-			)
-		);
+		.insert(solutions)
+		.values({
+			userId: session.user.id,
+			problemId,
+			language,
+			code: BOILERPLATE[language],
+			packages: [],
+			status,
+			updatedAt: new Date()
+		})
+		.onConflictDoUpdate({
+			target: [solutions.userId, solutions.problemId, solutions.language],
+			set: { status, updatedAt: new Date() }
+		});
 
 	return json({ ok: true });
 };
