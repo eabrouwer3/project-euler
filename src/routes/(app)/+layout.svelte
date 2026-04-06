@@ -12,7 +12,26 @@
 	import { Moon, Sun } from '@lucide/svelte';
 	import { toggleMode, mode } from 'mode-watcher';
 	import { browser } from '$app/environment';
+	import { invalidateAll } from '$app/navigation';
 	import type { LayoutData } from './$types.js';
+
+	let importInput: HTMLInputElement;
+
+	async function handleImport(e: Event) {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (!file) return;
+		const formData = new FormData();
+		formData.append('file', file);
+		const res = await fetch('/api/solutions/import', { method: 'POST', body: formData });
+		if (res.ok) {
+			const { imported } = await res.json();
+			alert(`Imported ${imported} solutions.`);
+			await invalidateAll();
+		} else {
+			alert('Import failed.');
+		}
+		importInput.value = '';
+	}
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
 
@@ -66,6 +85,14 @@
 						</button>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
+						<DropdownMenuItem>
+							<a href="/api/solutions/export" download="euler-solutions.zip" class="w-full">
+								Export solutions
+							</a>
+						</DropdownMenuItem>
+						<DropdownMenuItem onclick={() => importInput.click()}>
+							Import solutions
+						</DropdownMenuItem>
 						<DropdownMenuItem onclick={() => signOut({ redirectTo: '/login' })}>
 							Sign out
 						</DropdownMenuItem>
@@ -76,6 +103,8 @@
 			{/if}
 		</div>
 	</header>
+
+	<input bind:this={importInput} type="file" accept=".zip" class="hidden" onchange={handleImport} />
 
 	<!-- Body: sidebar + main -->
 	<div class="flex flex-1 overflow-hidden">

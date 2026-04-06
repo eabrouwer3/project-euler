@@ -71,4 +71,7 @@
 	.problem-content :global(.center) {
 		text-align: center;
 	}
+	.problem-content :global(.red) {
+		color: #ff0000;
+	}
 </style>
