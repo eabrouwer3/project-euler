@@ -42,7 +42,9 @@ RUN mkdir -p /tmp/clj-warmup \
     && rm -rf /tmp/clj-warmup
 
 WORKDIR /app
-COPY package.json server.ts validate-packages.ts ./
+COPY shared/validate-packages.ts ./shared/validate-packages.ts
+COPY runner/package.json runner/server.ts ./runner/
 
+WORKDIR /app/runner
 EXPOSE 3001
 CMD ["node", "--experimental-strip-types", "server.ts"]
