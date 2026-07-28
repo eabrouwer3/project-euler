@@ -42,8 +42,12 @@ RUN mkdir -p /tmp/clj-warmup \
     && rm -rf /tmp/clj-warmup
 
 WORKDIR /app
-COPY shared/validate-packages.ts ./shared/validate-packages.ts
-COPY runner/package.json runner/server.ts ./runner/
+COPY package.json package-lock.json ./
+COPY shared/package.json shared/validate-packages.ts ./shared/
+COPY runner/package.json ./runner/
+RUN npm ci --workspace=runner --include-workspace-root=false
+
+COPY runner/server.ts ./runner/
 
 WORKDIR /app/runner
 EXPOSE 3001

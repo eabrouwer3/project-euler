@@ -3,7 +3,7 @@ import { db } from '$lib/server/db.js';
 import { solutions } from '../../../../drizzle/schema.js';
 import { and, eq } from 'drizzle-orm';
 import { BOILERPLATE } from '$lib/constants.js';
-import { validatePackages } from '../../../../shared/validate-packages.js';
+import { validatePackages } from '@euler/shared';
 import type { RequestHandler } from './$types.js';
 import type { Language, SolutionStatus } from '$lib/types.js';
 
