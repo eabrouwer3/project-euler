@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn, execFileSync } from 'child_process';
+import { validatePackages } from './validate-packages.ts';
 
 const PORT = 3001;
 const TIMEOUT_MS = 30_000;
@@ -58,6 +59,8 @@ async function execCode(
 	packages: string[],
 	dir: string
 ): Promise<{ stdout: string; stderr: string }> {
+	validatePackages(packages);
+
 	let cmd: string;
 
 	switch (language) {
