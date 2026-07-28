@@ -3,6 +3,7 @@ import { db } from '$lib/server/db.js';
 import { solutions } from '../../../../drizzle/schema.js';
 import { and, eq } from 'drizzle-orm';
 import { BOILERPLATE } from '$lib/constants.js';
+import { validatePackages } from '$lib/server/validate-packages.js';
 import type { RequestHandler } from './$types.js';
 import type { Language, SolutionStatus } from '$lib/types.js';
 
@@ -42,6 +43,12 @@ export const POST: RequestHandler = async (event) => {
 	};
 
 	if (!problemId || !language || code === undefined) error(400, 'Missing required fields');
+
+	try {
+		validatePackages(language, packages);
+	} catch {
+		error(400, 'Invalid package specifier');
+	}
 
 	await db
 		.insert(solutions)

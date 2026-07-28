@@ -2,6 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db.js';
 import { solutions } from '../../../../../drizzle/schema.js';
 import { unzipSync, strFromU8 } from 'fflate';
+import { validatePackages } from '$lib/server/validate-packages.js';
 import type { RequestHandler } from './$types.js';
 import type { Language, SolutionStatus } from '$lib/types.js';
 
@@ -35,6 +36,11 @@ export const POST: RequestHandler = async (event) => {
 
 	for (const sol of data) {
 		if (!sol.problemId || !sol.language) continue;
+		try {
+			validatePackages(sol.language, sol.packages ?? []);
+		} catch {
+			continue;
+		}
 		await db
 			.insert(solutions)
 			.values({
