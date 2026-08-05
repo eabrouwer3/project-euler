@@ -1,6 +1,8 @@
 services:
   runner:
-    build: ./runner
+    build:
+      context: .
+      dockerfile: runner/Dockerfile
     ports:
       - "3001:3001"
 

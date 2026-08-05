@@ -3,10 +3,12 @@ import { mkdtemp, writeFile, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn, execFileSync } from 'child_process';
+import { validatePackages, type Language } from '@euler/shared';
 
 const PORT = 3001;
 const TIMEOUT_MS = 30_000;
 
+// Test gVisor availability once at startup
 type Language = 'python' | 'typescript' | 'clojure';
 
 let useGvisor = false;
@@ -59,6 +61,8 @@ async function execCode(
 	packages: string[],
 	dir: string
 ): Promise<{ stdout: string; stderr: string }> {
+	validatePackages(language, packages);
+
 	let cmd: string;
 
 	switch (language) {

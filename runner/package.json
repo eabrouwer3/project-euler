@@ -2,5 +2,8 @@
   "name": "euler-runner",
   "version": "1.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@euler/shared": "*"
+  }
 }

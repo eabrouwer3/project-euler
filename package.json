@@ -2,6 +2,10 @@
   "name": "project-euler-web",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "shared",
+    "runner"
+  ],
   "scripts": {
     "start": "node build/index.js",
     "dev": "vite dev",
@@ -12,6 +16,7 @@
   },
   "dependencies": {
     "@auth/sveltekit": "^1.7.4",
+    "@euler/shared": "*",
     "@monaco-editor/loader": "^1.4.0",
     "@tailwindcss/vite": "^4.2.2",
     "clsx": "^2.1.1",
