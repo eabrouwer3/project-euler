@@ -9,16 +9,17 @@ const TIMEOUT_MS = 30_000;
 
 type Language = 'python' | 'typescript' | 'clojure';
 
-// Test gVisor availability once at startup
 let useGvisor = false;
 try {
-	execFileSync('runsc', ['--rootless', '--platform=ptrace', 'do', '--', 'echo', 'ok'], {
+	execFileSync('runsc', ['--rootless', '--platform=ptrace', 'do', '--network=none', '--', 'echo', 'ok'], {
 		stdio: 'ignore',
 		timeout: 5000
 	});
 	useGvisor = true;
 	console.log('gVisor (runsc) available — sandboxing enabled');
 } catch {
+	// ponytail: no gVisor means no network isolation either (ulimit only caps CPU time);
+	// upgrade path is making runsc a hard requirement instead of a silent fallback
 	console.log('gVisor not available — running with ulimit only');
 }
 
@@ -104,7 +105,7 @@ function spawnWithTimeout(
 ): Promise<{ stdout: string; stderr: string }> {
 	return new Promise((resolve, reject) => {
 		const sandboxedCmd = useGvisor
-			? `runsc --rootless --platform=ptrace do -- sh -c ${JSON.stringify(cmd)}`
+			? `runsc --rootless --platform=ptrace do --network=none -- sh -c ${JSON.stringify(cmd)}`
 			: cmd;
 
 		const fullCmd = `ulimit -t 25; ${sandboxedCmd}`;
