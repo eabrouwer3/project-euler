@@ -99,13 +99,32 @@ function toolchainTemplate() {
 			'curl -fsSL https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh ' +
 				'-o /tmp/clj.sh && chmod +x /tmp/clj.sh && /tmp/clj.sh && rm /tmp/clj.sh'
 		)
-		// Warm the Maven cache so the first Clojure solve is not paying for a cold ~/.m2,
-		// exactly as the Dockerfile does.
-		.run(
-			'mkdir -p /tmp/w && cd /tmp/w && echo "(println 1)" > m.clj && echo "{:deps {}}" > deps.edn && ' +
-				'clojure -M m.clj && rm -rf /tmp/w'
-		);
+		// `withEnv` applies to build steps only and is not baked into sandboxes, so
+		// UV_PYTHON_INSTALL_DIR is gone at runtime and `uv run` would re-download the
+		// interpreter — about 23s, which is what made the first python e2e look like 29s.
+		// A symlink at a fixed path needs no runtime environment at all.
+		.run('ln -sf "$(/root/.local/bin/uv python find 3.13)" /usr/local/bin/python3.13')
+		// Warm every cache *in /app*, the directory solutions actually run in: Clojure's
+		// .cpcache is written relative to cwd, so warming it in /tmp bought nothing.
+		.run('mkdir -p /app')
+		.workdir('/app')
+		.run('echo "(println 1)" > m.clj && echo "{:deps {}}" > deps.edn && clojure -M m.clj')
+		.run('echo "console.log(1)" > w.ts && bun run w.ts && rm w.ts')
+		.run('rm -f m.clj deps.edn');
 }
+
+/**
+ * Run when a language produces the wrong answer. The interesting failure so far — g++ losing
+ * cc1plus at runtime while compiling fine during the build — is invisible in the timings, so
+ * capture the state of the toolchain rather than just recording a bad number.
+ */
+const DIAGNOSTIC = [
+	'echo "--- uname/df ---"; uname -m; df -h / | tail -1',
+	'echo "--- g++ ---"; command -v g++; g++ -print-prog-name=cc1plus; ls -la "$(g++ -print-prog-name=cc1plus)" 2>&1 | tail -1',
+	'echo "--- cc1plus on disk ---"; find /usr/lib /usr/libexec -name cc1plus 2>/dev/null | head -3',
+	'echo "--- dpkg ---"; dpkg -l | grep -cE "^ii\\s+(g\\+\\+|build-essential)"',
+	'echo "--- toolchains ---"; for c in python3.13 bun clojure rustc g++ as ld; do printf "%s=%s\\n" "$c" "$(command -v $c || echo MISSING)"; done'
+].join('; ');
 
 /** One real solution per language, with the command the runner would issue. */
 const SOLUTIONS = [
@@ -113,7 +132,7 @@ const SOLUTIONS = [
 		lang: 'python',
 		file: 'main.py',
 		code: 'print(sum(i for i in range(1000) if i%3==0 or i%5==0))',
-		cmd: '/opt/uv/python/*/bin/python3.13 main.py || /root/.local/bin/uv run --python 3.13 main.py'
+		cmd: 'python3.13 main.py'
 	},
 	{
 		lang: 'typescript',
@@ -218,19 +237,27 @@ async function main() {
 		await time('destroy', () => sbx.destroy());
 	}
 
-	// --- end to end, per language: fork -> write -> run -> destroy ---
+	// --- end to end, per language ---
+	// Provisions from the checkpoint rather than forking the base: it measured ~2.4s faster
+	// and needs no permanently running base sandbox, so it is the shape a port should use.
+	let diagnosed = false;
 	for (const s of canExec ? SOLUTIONS : []) {
 		for (let i = 0; i < RUNS; i++) {
 			await time(`e2e ${s.lang}`, async () => {
-				const fork = await base.fork(opts);
+				const sbx = await Sandbox.create(CHECKPOINT);
 				try {
-					await fork.files.write(`/app/${s.file}`, s.code);
-					const r = await fork.exec(s.cmd, { cwd: '/app', timeoutSec: 30 });
+					await sbx.files.write(`/app/${s.file}`, s.code);
+					const r = await sbx.exec(s.cmd, { cwd: '/app', timeoutSec: 30 });
 					if (!r.stdout.includes('233168')) {
 						console.error(`  ! ${s.lang} wrong output: ${r.stdout.trim()} ${r.stderr.trim()}`);
+						if (!diagnosed) {
+							diagnosed = true;
+							const d = await sbx.exec(DIAGNOSTIC, { timeoutSec: 60 });
+							console.error(`--- diagnostic (${s.lang}) ---\n${d.stdout}${d.stderr}---`);
+						}
 					}
 				} finally {
-					await fork.destroy();
+					await sbx.destroy();
 				}
 			});
 		}

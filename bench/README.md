@@ -53,9 +53,34 @@ worse than a bare VM (3.01s), so template size is not the thing to optimise.
 
 That puts fixed overhead around **2.7–3.0s of the 30s budget**, leaving ~27s for the solution.
 
-Not yet measured: `exec` round-trip and `files.write`, because they use a WebSocket to
-`ssh.railway.com:2226` and the environment this ran in only allows 443. Those add to the
-figures above — run the benchmark from an unrestricted network to close the gap.
+`exec` round-trip measured separately from an unrestricted network: **0.65s**.
+
+## Open: the toolchain is incomplete at runtime
+
+A run with `exec` available showed `g++` failing with `cannot execute 'cc1plus'`. Probe
+templates then established that g++ compiles correctly *during the build* and `cc1plus` is
+present on disk at that point — so the toolchain is intact in the template and missing in a
+sandbox derived from it. Files are being lost between template and running sandbox, which is
+not something a port can work around blindly.
+
+The same run showed suspiciously wide spreads on languages that should be deterministic
+(clojure 6.84→20.85s, typescript 5.10→17.19s), which would be consistent with a lazily
+materialised disk paging blocks in on first access. That is a hypothesis, not a finding.
+
+The benchmark now dumps toolchain state on any wrong answer, so the next run with `exec`
+reachable should identify it. Until it is understood, treat per-language e2e figures as
+provisional.
+
+### Artifacts already corrected
+
+The first e2e run was inflated by benchmark bugs, not sandbox cost:
+
+- **python 27–33s** — `withEnv` applies to build steps only and is *not* baked into sandboxes,
+  so `UV_PYTHON_INSTALL_DIR` was unset at runtime and `uv run` re-downloaded the interpreter
+  (~23s). Now symlinked to `/usr/local/bin/python3.13` at build time, needing no runtime env.
+- **clojure** — `.cpcache` is written relative to cwd, so warming it in `/tmp` bought nothing.
+  Warmups now run in `/app`, where solutions actually execute.
+- **e2e provisioning** used `fork` (~5.5s) rather than checkpoint restore (~2.7s).
 
 ## Notes
 
