@@ -7,9 +7,15 @@
 	import PackageInput from '$lib/components/PackageInput.svelte';
 	import ProblemDescription from '$lib/components/ProblemDescription.svelte';
 	import RunOutput from '$lib/components/RunOutput.svelte';
+	import { Button } from '$lib/components/ui/button/index.js';
 	import { BookOpen } from '@lucide/svelte';
 	import type { Language, SolutionStatus } from '$lib/types.js';
 	import type { PageData } from './$types.js';
+
+	// Green treatment layered over the outline variant, which otherwise wins on hover/dark
+	const SOLVED_BUTTON =
+		'border-green-500/40 bg-green-500/10 text-green-600 hover:bg-green-500/20 hover:text-green-600 ' +
+		'dark:border-green-500/40 dark:bg-green-500/15 dark:text-green-400 dark:hover:bg-green-500/25 dark:hover:text-green-400';
 
 	let { data }: { data: PageData } = $props();
 
@@ -146,27 +152,27 @@
 						to save progress</span>
 				</span>
 			{:else}
-				<button
+				<Button
 					onclick={toggleStatus}
-					class="ml-auto whitespace-nowrap rounded px-2 py-1 text-xs transition-colors
-						{status === 'solved'
-						? 'bg-green-500/20 text-green-600 hover:bg-green-500/30 dark:text-green-400'
-						: 'text-muted-foreground hover:text-foreground'}"
+					variant="outline"
+					size="sm"
+					class="ml-auto h-7 text-xs {status === 'solved' ? SOLVED_BUTTON : ''}"
 				>
 					{status === 'solved' ? '✓ Solved' : 'Mark solved'}
-				</button>
+				</Button>
 			{/if}
 
 			<!-- Mobile: slide the problem description out from the right -->
-			<button
+			<Button
 				onclick={() => (problemOpen = !problemOpen)}
-				class="-mr-1 flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground md:hidden"
-				aria-label="Show problem"
+				variant="outline"
+				size="sm"
+				class="h-7 text-xs md:hidden"
 				aria-expanded={problemOpen}
 			>
 				<BookOpen size={14} />
 				Problem
-			</button>
+			</Button>
 		</div>
 
 		<!-- Monaco editor -->
