@@ -32,6 +32,20 @@ const REGION = process.env.BENCH_REGION ?? 'us-east4-eqdc4a';
 /** Short idle timeout: sandboxes bill while idle, and a benchmark that dies should not leak cost. */
 const IDLE_MINUTES = 1;
 
+/**
+ * A sandbox `exec` runs with no PATH in its environment. Interactive shells hide this — bash
+ * falls back to a compiled-in default, so `command -v g++` answers and every toolchain looks
+ * installed — but any tool that spawns a helper through PATH gets ENOENT. That is one bug
+ * wearing three masks: g++ "cannot execute cc1plus", collect2 "cannot find ld", and rustc
+ * "linker `cc` not found". None of them appear during a template build, which has a normal PATH.
+ *
+ * Baking it at create time fixes every command in the sandbox at once, rather than prefixing
+ * each one and waiting to be surprised by the next tool that shells out.
+ */
+const SANDBOX_ENV = {
+	PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.cargo/bin:/root/.local/bin'
+};
+
 const CHECKPOINT = 'euler-bench-base';
 
 type Sample = { label: string; ms: number[] };
@@ -118,24 +132,18 @@ function toolchainTemplate() {
 }
 
 /**
- * Run when a language produces the wrong answer.
- *
- * The open failure is g++ reporting "cannot execute cc1plus" while cc1plus is demonstrably on
- * disk and g++ compiles fine during the template build. Two candidate explanations survive:
- * gcc's search path does not include where the binary actually lives, or the binary is there
- * but cannot be exec'd (a missing ELF interpreter also surfaces as ENOENT). These probes
- * separate them, and the last one tests the fix that a search-path fault would imply.
+ * Run when a language produces the wrong answer. PATH comes first because an unset PATH was
+ * the cause of every toolchain failure seen so far, and it is invisible to the checks that
+ * look most reassuring — `command -v` answers from bash's fallback path whether or not the
+ * environment has one, so it reports a healthy toolchain right up until something spawns.
  */
-const CC1 = '/usr/libexec/gcc/x86_64-linux-gnu/14';
 const DIAGNOSTIC = [
-	'echo "--- versions ---"; g++ --version | head -1; g++ -dumpversion; g++ -dumpmachine; readlink -f /usr/bin/g++',
-	`echo "--- libexec vs lib ---"; ls /usr/libexec/gcc/x86_64-linux-gnu/ 2>&1; ls /usr/lib/gcc/x86_64-linux-gnu/ 2>&1`,
-	'echo "--- gcc search dirs ---"; g++ -print-search-dirs | head -3',
-	'echo "--- gcc-related env ---"; env | grep -iE "^(GCC|COMPILER|LD_|PATH)=" | head',
-	`echo "--- is cc1plus executable? ---"; file ${CC1}/cc1plus 2>&1 | head -1; ${CC1}/cc1plus --version 2>&1 | head -1`,
-	`echo "--- does -B fix it? ---"; echo "int main(){return 0;}" > /tmp/p.cpp; g++ -B${CC1}/ -o /tmp/p /tmp/p.cpp 2>&1 | head -2 && echo "B_FLAG_WORKS"`,
-	'echo "--- dpkg gcc set ---"; dpkg -l | grep -E "^ii +(gcc|g\\+\\+|cpp)" | awk \'{print $2, $3}\'',
-	'echo "--- toolchains ---"; for c in python3.13 bun clojure rustc cargo g++ as ld; do printf "%s=%s\\n" "$c" "$(command -v $c || echo MISSING)"; done'
+	'echo "--- PATH (empty brackets = the bug) ---"; echo "[$PATH]"',
+	'echo "--- spawn helpers resolvable? ---"; g++ -print-prog-name=cc1plus; g++ -print-prog-name=ld',
+	'echo "--- compile probes ---"; echo "int main(){return 0;}" > /tmp/p.cpp; ' +
+		'g++ -o /tmp/p /tmp/p.cpp && echo CPP_OK; ' +
+		'echo "fn main(){}" > /tmp/p.rs; rustc -o /tmp/pr /tmp/p.rs && echo RUST_OK',
+	'echo "--- toolchains ---"; for c in python3.13 bun clojure rustc cargo cc g++ as ld; do printf "%s=%s\\n" "$c" "$(command -v $c || echo MISSING)"; done'
 ].join('; ');
 
 /** One real solution per language, with the command the runner would issue. */
@@ -210,7 +218,7 @@ async function main() {
 	if (!process.env.RAILWAY_API_TOKEN) throw new Error('set RAILWAY_API_TOKEN');
 	if (!process.env.RAILWAY_ENVIRONMENT_ID) throw new Error('set RAILWAY_ENVIRONMENT_ID');
 
-	const opts = { region: REGION, idleTimeoutMinutes: IDLE_MINUTES };
+	const opts = { region: REGION, idleTimeoutMinutes: IDLE_MINUTES, env: SANDBOX_ENV };
 	const canExec = await wsReachable();
 	console.log(`region=${REGION} runs=${RUNS} quick=${QUICK} exec=${canExec ? 'yes' : 'BLOCKED'}`);
 	if (!canExec) {
@@ -234,12 +242,12 @@ async function main() {
 	await time('template build (cold or cached)', () => template.build());
 
 	for (let i = 0; i < RUNS; i++) {
-		const sbx = await time('create (from template)', () => Sandbox.create(template));
+		const sbx = await time('create (from template)', () => Sandbox.create(template, opts));
 		await time('destroy', () => sbx.destroy());
 	}
 
 	// --- the shape a real submission would take: keep a warm base, fork per run ---
-	const base = await Sandbox.create(template);
+	const base = await Sandbox.create(template, opts);
 	for (let i = 0; i < RUNS; i++) {
 		const fork = await time('fork (from warm base)', () => base.fork(opts));
 		await time('destroy', () => fork.destroy());
@@ -247,7 +255,7 @@ async function main() {
 
 	await time('checkpoint capture', () => base.checkpoint(CHECKPOINT));
 	for (let i = 0; i < RUNS; i++) {
-		const sbx = await time('create (from checkpoint)', () => Sandbox.create(CHECKPOINT));
+		const sbx = await time('create (from checkpoint)', () => Sandbox.create(CHECKPOINT, opts));
 		await time('destroy', () => sbx.destroy());
 	}
 
@@ -258,7 +266,7 @@ async function main() {
 	for (const s of canExec ? SOLUTIONS : []) {
 		for (let i = 0; i < RUNS; i++) {
 			await time(`e2e ${s.lang}`, async () => {
-				const sbx = await Sandbox.create(CHECKPOINT);
+				const sbx = await Sandbox.create(CHECKPOINT, opts);
 				try {
 					await sbx.files.write(`/app/${s.file}`, s.code);
 					const r = await sbx.exec(s.cmd, { cwd: '/app', timeoutSec: 30 });

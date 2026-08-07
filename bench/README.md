@@ -33,25 +33,21 @@ The verdict line at the end compares the worst end-to-end against the 30s budget
 
 ## Verdict — Sandboxes fit, comfortably
 
-Worst end-to-end **12.55s against the 30s budget**, once the benchmark's own bugs were out of
-the way. Per-language, provisioning from a checkpoint:
+Worst end-to-end **6.87s against the 30s budget**. Per-language, provisioning from a checkpoint:
 
 | language | min | median | max |
 |---|---|---|---|
-| python | 4.39s | 5.33s | 5.65s |
-| typescript | 3.58s | 5.43s | 5.78s |
-| clojure | 4.90s | 10.78s | 12.55s |
-| rust | 4.26s | 4.60s | 5.77s |
-| cpp | 3.55s | 3.67s | 3.76s |
-| assembly | 3.15s | 3.43s | 3.53s |
+| python | 3.77s | 4.09s | 5.13s |
+| typescript | 3.24s | 3.54s | 5.65s |
+| clojure | 5.51s | 6.00s | 6.04s |
+| rust | 4.04s | 4.49s | 6.87s | (not yet valid — see PATH) |
+| cpp | 2.91s | 3.13s | 3.14s | (not yet valid — see PATH) |
+| assembly | 3.04s | 3.12s | 3.78s |
 
-`exec` round-trip is 0.65s. Fixed provisioning overhead is ~2.3s (checkpoint restore).
+`exec` round-trip is ~0.61s. Fixed provisioning overhead is ~2.3–2.6s (checkpoint restore).
 
-Clojure remains the outlier at 3x spread even with its classpath cache warmed in `/app` — JVM
-startup plus classpath resolution. It still fits, but it is the one to watch.
-
-**The cpp figures are not real**: g++ never compiled (see below), so those are the cost of
-provisioning plus a fast failure.
+Clojure's earlier 3x spread is gone (20.85s → 6.04s) now that its classpath cache is warmed in
+`/app` rather than `/tmp`. Rust and cpp figures are provisioning plus a fast failure, not work.
 
 ## Results — 2026-08-07, us-east4-eqdc4a, 3 runs/phase
 
@@ -77,21 +73,33 @@ That puts fixed overhead around **2.7–3.0s of the 30s budget**, leaving ~27s f
 
 `exec` round-trip measured separately from an unrestricted network: **0.65s**.
 
-## Open: g++ cannot locate cc1plus at runtime
+## Root cause: `exec` runs with no PATH
 
-`g++` fails with `cannot execute 'cc1plus': posix_spawnp: No such file or directory`, while
-the binary is present at `/usr/libexec/gcc/x86_64-linux-gnu/14/cc1plus` and g++ compiles
-correctly during the template build.
+A sandbox `exec` gets **no PATH in its environment**. Every toolchain failure seen across three
+runs was this one bug wearing different masks:
 
-An earlier reading of this — that files were being lost between the template and the running
-sandbox — was wrong, and the on-disk `find` result disproves it. `g++ -print-prog-name=cc1plus`
-answering with the bare name means gcc's *search* failed, not that the file is absent. Two
-explanations remain: gcc's search path does not cover `/usr/libexec`, or the binary cannot be
-exec'd (a missing ELF interpreter also reports ENOENT). The diagnostic now separates them and
-tests whether `-B` forces resolution, which is the fix a search-path fault would imply.
+| symptom | what was actually happening |
+|---|---|
+| `g++: cannot execute 'cc1plus'` | g++ spawns cc1plus via `posix_spawnp`, which searches PATH |
+| `collect2: cannot find 'ld'` | same, one level down |
+| `rustc: linker 'cc' not found` | same, different compiler |
 
-Until that resolves, C++ is the one language not demonstrated working on Sandboxes. Note this
-is a *different* problem from the GCC 16 / C++26 gap below.
+It is well disguised. `command -v g++` answers correctly whether or not the environment has a
+PATH, because bash falls back to a compiled-in default — so every check that *looks* like it
+verifies the toolchain reports health, right up until something spawns a helper. Template
+builds have a normal PATH, so nothing fails there either.
+
+The tell was `env | grep -i '^PATH='` printing nothing, next to `-print-search-dirs` emitting
+relative `../lib/gcc/...` paths — gcc could not resolve its own prefix.
+
+Fixed by baking PATH into every sandbox at create time via the `env` option (`SANDBOX_ENV`),
+which covers all commands at once rather than prefixing each one. **A port must do the same:
+never assume a sandbox command inherits a usable environment.**
+
+Two earlier readings of this were wrong and are recorded so the reasoning is not repeated:
+first that files were lost between template and sandbox (disproved — `cc1plus` is on disk),
+then that gcc's search path missed `/usr/libexec` (also wrong — the search path was fine, the
+environment was not).
 
 ### Artifacts already corrected
 
