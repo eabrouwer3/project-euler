@@ -13,12 +13,7 @@ RUN curl -fsSL https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 RUN uv python install 3.13
 
-# Node 22
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Bun 1
+# Bun 1 — runs this service and executes user TypeScript submissions
 RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
 
 # GCC 16 for C++26, plus binutils (as/ld) for assembly and rustc's linker.
@@ -65,13 +60,13 @@ RUN mkdir -p /tmp/clj-warmup \
     && rm -rf /tmp/clj-warmup
 
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json bun.lock ./
 COPY shared/package.json shared/validate-packages.ts ./shared/
 COPY runner/package.json ./runner/
-RUN npm ci --workspace=runner --include-workspace-root=false
+RUN bun install --frozen-lockfile --filter euler-runner
 
 COPY runner/server.ts ./runner/
 
 WORKDIR /app/runner
 EXPOSE 3001
-CMD ["node", "--experimental-strip-types", "server.ts"]
+CMD ["bun", "run", "server.ts"]
