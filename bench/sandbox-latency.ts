@@ -104,6 +104,10 @@ function toolchainTemplate() {
 		// interpreter — about 23s, which is what made the first python e2e look like 29s.
 		// A symlink at a fixed path needs no runtime environment at all.
 		.run('ln -sf "$(/root/.local/bin/uv python find 3.13)" /usr/local/bin/python3.13')
+		// Same reasoning for rustup, which installs under /root/.cargo and is off the runtime
+		// PATH — the earlier run only passed because the benchmark's command prepended it.
+		.run('ln -sf /root/.cargo/bin/rustc /usr/local/bin/rustc')
+		.run('ln -sf /root/.cargo/bin/cargo /usr/local/bin/cargo')
 		// Warm every cache *in /app*, the directory solutions actually run in: Clojure's
 		// .cpcache is written relative to cwd, so warming it in /tmp bought nothing.
 		.run('mkdir -p /app')
@@ -114,16 +118,24 @@ function toolchainTemplate() {
 }
 
 /**
- * Run when a language produces the wrong answer. The interesting failure so far — g++ losing
- * cc1plus at runtime while compiling fine during the build — is invisible in the timings, so
- * capture the state of the toolchain rather than just recording a bad number.
+ * Run when a language produces the wrong answer.
+ *
+ * The open failure is g++ reporting "cannot execute cc1plus" while cc1plus is demonstrably on
+ * disk and g++ compiles fine during the template build. Two candidate explanations survive:
+ * gcc's search path does not include where the binary actually lives, or the binary is there
+ * but cannot be exec'd (a missing ELF interpreter also surfaces as ENOENT). These probes
+ * separate them, and the last one tests the fix that a search-path fault would imply.
  */
+const CC1 = '/usr/libexec/gcc/x86_64-linux-gnu/14';
 const DIAGNOSTIC = [
-	'echo "--- uname/df ---"; uname -m; df -h / | tail -1',
-	'echo "--- g++ ---"; command -v g++; g++ -print-prog-name=cc1plus; ls -la "$(g++ -print-prog-name=cc1plus)" 2>&1 | tail -1',
-	'echo "--- cc1plus on disk ---"; find /usr/lib /usr/libexec -name cc1plus 2>/dev/null | head -3',
-	'echo "--- dpkg ---"; dpkg -l | grep -cE "^ii\\s+(g\\+\\+|build-essential)"',
-	'echo "--- toolchains ---"; for c in python3.13 bun clojure rustc g++ as ld; do printf "%s=%s\\n" "$c" "$(command -v $c || echo MISSING)"; done'
+	'echo "--- versions ---"; g++ --version | head -1; g++ -dumpversion; g++ -dumpmachine; readlink -f /usr/bin/g++',
+	`echo "--- libexec vs lib ---"; ls /usr/libexec/gcc/x86_64-linux-gnu/ 2>&1; ls /usr/lib/gcc/x86_64-linux-gnu/ 2>&1`,
+	'echo "--- gcc search dirs ---"; g++ -print-search-dirs | head -3',
+	'echo "--- gcc-related env ---"; env | grep -iE "^(GCC|COMPILER|LD_|PATH)=" | head',
+	`echo "--- is cc1plus executable? ---"; file ${CC1}/cc1plus 2>&1 | head -1; ${CC1}/cc1plus --version 2>&1 | head -1`,
+	`echo "--- does -B fix it? ---"; echo "int main(){return 0;}" > /tmp/p.cpp; g++ -B${CC1}/ -o /tmp/p /tmp/p.cpp 2>&1 | head -2 && echo "B_FLAG_WORKS"`,
+	'echo "--- dpkg gcc set ---"; dpkg -l | grep -E "^ii +(gcc|g\\+\\+|cpp)" | awk \'{print $2, $3}\'',
+	'echo "--- toolchains ---"; for c in python3.13 bun clojure rustc cargo g++ as ld; do printf "%s=%s\\n" "$c" "$(command -v $c || echo MISSING)"; done'
 ].join('; ');
 
 /** One real solution per language, with the command the runner would issue. */
@@ -150,7 +162,9 @@ const SOLUTIONS = [
 		lang: 'rust',
 		file: 'main.rs',
 		code: 'fn main(){ println!("{}", (0..1000).filter(|i| i%3==0||i%5==0).sum::<i32>()); }',
-		cmd: 'PATH=$PATH:/root/.cargo/bin rustc -O --edition 2021 -o main main.rs && ./main'
+		// No PATH prefix on purpose: this now exercises the /usr/local/bin symlink, so a
+		// regression shows up as a failure instead of being masked by the benchmark.
+		cmd: 'rustc -O --edition 2021 -o main main.rs && ./main'
 	},
 	{
 		lang: 'cpp',

@@ -31,6 +31,28 @@ Requires Sandboxes, which are gated behind
 
 The verdict line at the end compares the worst end-to-end against the 30s budget.
 
+## Verdict — Sandboxes fit, comfortably
+
+Worst end-to-end **12.55s against the 30s budget**, once the benchmark's own bugs were out of
+the way. Per-language, provisioning from a checkpoint:
+
+| language | min | median | max |
+|---|---|---|---|
+| python | 4.39s | 5.33s | 5.65s |
+| typescript | 3.58s | 5.43s | 5.78s |
+| clojure | 4.90s | 10.78s | 12.55s |
+| rust | 4.26s | 4.60s | 5.77s |
+| cpp | 3.55s | 3.67s | 3.76s |
+| assembly | 3.15s | 3.43s | 3.53s |
+
+`exec` round-trip is 0.65s. Fixed provisioning overhead is ~2.3s (checkpoint restore).
+
+Clojure remains the outlier at 3x spread even with its classpath cache warmed in `/app` — JVM
+startup plus classpath resolution. It still fits, but it is the one to watch.
+
+**The cpp figures are not real**: g++ never compiled (see below), so those are the cost of
+provisioning plus a fast failure.
+
 ## Results — 2026-08-07, us-east4-eqdc4a, 3 runs/phase
 
 | phase | min | median | max |
@@ -55,21 +77,21 @@ That puts fixed overhead around **2.7–3.0s of the 30s budget**, leaving ~27s f
 
 `exec` round-trip measured separately from an unrestricted network: **0.65s**.
 
-## Open: the toolchain is incomplete at runtime
+## Open: g++ cannot locate cc1plus at runtime
 
-A run with `exec` available showed `g++` failing with `cannot execute 'cc1plus'`. Probe
-templates then established that g++ compiles correctly *during the build* and `cc1plus` is
-present on disk at that point — so the toolchain is intact in the template and missing in a
-sandbox derived from it. Files are being lost between template and running sandbox, which is
-not something a port can work around blindly.
+`g++` fails with `cannot execute 'cc1plus': posix_spawnp: No such file or directory`, while
+the binary is present at `/usr/libexec/gcc/x86_64-linux-gnu/14/cc1plus` and g++ compiles
+correctly during the template build.
 
-The same run showed suspiciously wide spreads on languages that should be deterministic
-(clojure 6.84→20.85s, typescript 5.10→17.19s), which would be consistent with a lazily
-materialised disk paging blocks in on first access. That is a hypothesis, not a finding.
+An earlier reading of this — that files were being lost between the template and the running
+sandbox — was wrong, and the on-disk `find` result disproves it. `g++ -print-prog-name=cc1plus`
+answering with the bare name means gcc's *search* failed, not that the file is absent. Two
+explanations remain: gcc's search path does not cover `/usr/libexec`, or the binary cannot be
+exec'd (a missing ELF interpreter also reports ENOENT). The diagnostic now separates them and
+tests whether `-B` forces resolution, which is the fix a search-path fault would imply.
 
-The benchmark now dumps toolchain state on any wrong answer, so the next run with `exec`
-reachable should identify it. Until it is understood, treat per-language e2e figures as
-provisional.
+Until that resolves, C++ is the one language not demonstrated working on Sandboxes. Note this
+is a *different* problem from the GCC 16 / C++26 gap below.
 
 ### Artifacts already corrected
 
@@ -81,6 +103,10 @@ The first e2e run was inflated by benchmark bugs, not sandbox cost:
 - **clojure** — `.cpcache` is written relative to cwd, so warming it in `/tmp` bought nothing.
   Warmups now run in `/app`, where solutions actually execute.
 - **e2e provisioning** used `fork` (~5.5s) rather than checkpoint restore (~2.7s).
+- **rust** reported `rustc=MISSING`: rustup installs under `/root/.cargo/bin`, off the runtime
+  PATH. It only passed because the benchmark's own command prepended that directory — the
+  benchmark was hiding the bug it should have caught. Now symlinked into `/usr/local/bin`, and
+  the command no longer sets PATH, so a regression fails loudly.
 
 ## Notes
 
