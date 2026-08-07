@@ -1,8 +1,9 @@
 <script lang="ts">
 	import renderMathInElement from 'katex/contrib/auto-render';
 	import 'katex/dist/katex.min.css';
+	import { X } from '@lucide/svelte';
 
-	let { html, width = 320 }: { html: string; width?: number } = $props();
+	let { html, onclose }: { html: string; onclose?: () => void } = $props();
 
 	let container: HTMLDivElement | undefined = $state();
 
@@ -20,13 +21,22 @@
 	});
 </script>
 
-<aside style="width: {width}px" class="flex h-full shrink-0 flex-col border-l border-border bg-card">
-	<div class="border-b border-border px-4 py-3">
+<aside class="flex h-full w-full flex-col border-l border-border bg-card">
+	<div class="flex items-center justify-between border-b border-border px-4 py-3">
 		<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
 			Problem
 		</span>
+		{#if onclose}
+			<button
+				onclick={onclose}
+				class="-mr-1 rounded p-1 text-muted-foreground hover:text-foreground md:hidden"
+				aria-label="Hide problem"
+			>
+				<X size={16} />
+			</button>
+		{/if}
 	</div>
-	<div class="flex-1 overflow-y-auto">
+	<div class="flex-1 overflow-auto">
 		<div bind:this={container} class="problem-content p-4 text-sm leading-relaxed">
 			{@html html}
 		</div>
@@ -34,6 +44,9 @@
 </aside>
 
 <style>
+	.problem-content {
+		overflow-wrap: break-word;
+	}
 	.problem-content :global(p) {
 		margin-bottom: 0.75rem;
 	}

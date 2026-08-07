@@ -3,7 +3,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 </script>
 
-<div class="flex min-h-screen items-center justify-center bg-background">
+<div class="flex min-h-dvh items-center justify-center bg-background">
 	<div class="flex flex-col items-center gap-6 text-center">
 		<div>
 			<h1 class="text-3xl font-bold tracking-tight">Project Euler Portal</h1>

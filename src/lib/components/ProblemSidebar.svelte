@@ -7,9 +7,8 @@
 
 	let {
 		problems,
-		solutionSummaries = [],
-		width = 256
-	}: { problems: Problem[]; solutionSummaries: SolutionSummary[]; width?: number } = $props();
+		solutionSummaries = []
+	}: { problems: Problem[]; solutionSummaries: SolutionSummary[] } = $props();
 
 	let filter = $state<FilterOption>('all');
 
@@ -45,7 +44,7 @@
 	];
 </script>
 
-<aside style="width: {width}px" class="flex h-full shrink-0 flex-col border-r border-border bg-card">
+<aside class="flex h-full w-full flex-col border-r border-border bg-card">
 	<div class="border-b border-border px-4 py-3">
 		<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
 			Problems
@@ -54,7 +53,7 @@
 			{#each filters as f (f.value)}
 				<button
 					onclick={() => (filter = f.value)}
-					class="rounded px-2 py-0.5 text-xs transition-colors
+					class="rounded px-2 py-1 text-xs transition-colors md:py-0.5
 						{filter === f.value
 						? 'bg-accent font-medium text-accent-foreground'
 						: 'text-muted-foreground hover:text-foreground'}"
@@ -69,7 +68,7 @@
 			{@const chips = summaryMap.get(problem.id) ?? []}
 			<a
 				href="/problem/{problem.id}/{currentLanguage}"
-				class="flex items-center gap-3 px-4 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground
+				class="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground md:py-2
 					{currentId === problem.id ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground'}"
 			>
 				<span class="w-8 shrink-0 font-mono text-xs opacity-50">
