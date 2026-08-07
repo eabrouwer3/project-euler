@@ -7,6 +7,7 @@
 	import PackageInput from '$lib/components/PackageInput.svelte';
 	import ProblemDescription from '$lib/components/ProblemDescription.svelte';
 	import RunOutput from '$lib/components/RunOutput.svelte';
+	import { SUPPORTS_PACKAGES } from '$lib/constants.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { BookOpen } from '@lucide/svelte';
 	import type { Language, SolutionStatus } from '$lib/types.js';
@@ -191,7 +192,9 @@
 				role="separator"
 				aria-label="Resize output panel"
 			></div>
-			<PackageInput bind:packages onchange={(pkgs) => scheduleAutosave(code, pkgs)} />
+			{#if SUPPORTS_PACKAGES[data.language]}
+				<PackageInput bind:packages onchange={(pkgs) => scheduleAutosave(code, pkgs)} />
+			{/if}
 			<RunOutput onrun={runSolution} disabled={saveStatus === 'saving'} />
 		</div>
 	</div>

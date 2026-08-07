@@ -88,7 +88,7 @@
 
 			defineAtomThemes(m);
 
-			// Configure TypeScript for Deno-style ESNext modules
+			// Configure TypeScript for Bun-style ESNext modules
 			monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
 				target: monaco.languages.typescript.ScriptTarget.ESNext,
 				module: monaco.languages.typescript.ModuleKind.ESNext,

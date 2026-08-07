@@ -18,8 +18,22 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Deno 2
-RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local DENO_VERSION=v2.3.3 sh
+# Bun 1
+RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
+
+# GCC 14 for C++23, plus binutils (as/ld) for assembly and rustc's linker.
+# g++-14 is not noble's default, so alternatives make plain `g++`/`gcc` resolve to it.
+RUN apt-get update && apt-get install -y build-essential g++-14 gcc-14 \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust (stable)
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+ENV PATH="/usr/local/cargo/bin:$PATH"
+RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+    | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable \
+    && chmod -R a+w $CARGO_HOME
 
 # Clojure 1.12 CLI
 RUN curl -fsSL https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh -o /tmp/clj-install.sh \

@@ -1,16 +1,14 @@
 import http from 'http';
-import { mkdtemp, writeFile, rm } from 'fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn, execFileSync } from 'child_process';
-import { validatePackages, type Language } from '@euler/shared';
+import { cargoToml, parsePackageSpec, validatePackages, type Language } from '@euler/shared';
 
 const PORT = 3001;
 const TIMEOUT_MS = 30_000;
 
 // Test gVisor availability once at startup
-type Language = 'python' | 'typescript' | 'clojure';
-
 let useGvisor = false;
 try {
 	execFileSync('runsc', ['--rootless', '--platform=ptrace', 'do', '--network=none', '--', 'echo', 'ok'], {
@@ -76,10 +74,17 @@ async function execCode(
 		}
 		case 'typescript': {
 			await writeFile(join(dir, 'main.ts'), code);
-			const imports: Record<string, string> = {};
-			for (const pkg of packages) imports[pkg] = `npm:${pkg}`;
-			await writeFile(join(dir, 'deno.json'), JSON.stringify({ imports }, null, 2));
-			cmd = 'deno run --allow-read --allow-env main.ts';
+			const dependencies: Record<string, string> = {};
+			for (const pkg of packages) {
+				const { name, version = '*' } = parsePackageSpec(pkg);
+				dependencies[name] = version;
+			}
+			await writeFile(
+				join(dir, 'package.json'),
+				JSON.stringify({ name: 'solution', private: true, dependencies }, null, 2)
+			);
+			cmd =
+				packages.length > 0 ? 'bun install --no-progress && bun run main.ts' : 'bun run main.ts';
 			break;
 		}
 		case 'clojure': {
@@ -96,6 +101,29 @@ async function execCode(
 					.join(' ')}}}`
 			);
 			cmd = 'clojure -M main.clj';
+			break;
+		}
+		case 'rust': {
+			// Cargo only earns its build overhead when there are crates to resolve
+			if (packages.length === 0) {
+				await writeFile(join(dir, 'main.rs'), code);
+				cmd = 'rustc -O -o main main.rs && ./main';
+				break;
+			}
+			await mkdir(join(dir, 'src'), { recursive: true });
+			await writeFile(join(dir, 'src', 'main.rs'), code);
+			await writeFile(join(dir, 'Cargo.toml'), cargoToml(packages));
+			cmd = 'cargo run --quiet --release';
+			break;
+		}
+		case 'cpp': {
+			await writeFile(join(dir, 'main.cpp'), code);
+			cmd = 'g++ -O2 -std=c++23 -o main main.cpp && ./main';
+			break;
+		}
+		case 'assembly': {
+			await writeFile(join(dir, 'main.s'), code);
+			cmd = 'as -o main.o main.s && ld -o main main.o && ./main';
 			break;
 		}
 	}

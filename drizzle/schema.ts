@@ -27,7 +27,10 @@ export const solutions = pgTable(
 	},
 	(t) => [
 		unique().on(t.userId, t.problemId, t.language),
-		check('language_check', sql`${t.language} IN ('python', 'typescript', 'clojure')`),
+		check(
+			'language_check',
+			sql`${t.language} IN ('python', 'typescript', 'clojure', 'rust', 'cpp', 'assembly')`
+		),
 		check('status_check', sql`${t.status} IN ('in_progress', 'solved')`)
 	]
 );

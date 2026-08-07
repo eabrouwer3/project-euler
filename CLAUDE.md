@@ -41,7 +41,7 @@ Docker Compose provides PostgreSQL at `localhost:5432` with default credentials 
 **Core data flow:**
 1. Problem list and descriptions are fetched from `projecteuler.net/minimal=*` and cached in-memory for 1 hour
 2. User solutions are stored in PostgreSQL (one row per user + problem + language)
-3. Code execution: `POST /api/run` spawns a Docker container with resource limits (256MB RAM, 0.5 CPU, 30s timeout, no network access); supports Python, TypeScript (Deno), and Clojure
+3. Code execution: `POST /api/run` spawns a Docker container with resource limits (256MB RAM, 0.5 CPU, 30s timeout, no network access); supports Python, TypeScript (Bun), Clojure, Rust, C++, and x86-64 assembly (GNU as)
 
 **Key directories:**
 - `src/lib/server/` — auth, DB client, Docker runner, problem fetching

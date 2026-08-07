@@ -1,7 +1,8 @@
 import { spawn } from 'child_process';
-import { mkdtemp, writeFile, rm } from 'fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { cargoToml, parsePackageSpec } from '@euler/shared';
 import type { Language } from '$lib/types.js';
 
 const TIMEOUT_MS = 30_000;
@@ -66,22 +67,19 @@ async function writeFiles(
 
 		case 'typescript': {
 			await writeFile(join(dir, 'main.ts'), code);
-			const importsMap: Record<string, string> = {};
+			const dependencies: Record<string, string> = {};
 			for (const pkg of packages) {
-				importsMap[pkg] = `npm:${pkg}`;
+				const { name, version = '*' } = parsePackageSpec(pkg);
+				dependencies[name] = version;
 			}
 			await writeFile(
-				join(dir, 'deno.json'),
-				JSON.stringify({ imports: importsMap }, null, 2)
+				join(dir, 'package.json'),
+				JSON.stringify({ name: 'solution', private: true, dependencies }, null, 2)
 			);
-			return [
-				...commonFlags,
-				'denoland/deno',
-				'run',
-				'--allow-read',
-				'--allow-env',
-				'main.ts'
-			];
+			const cmd =
+				packages.length > 0 ? 'bun install --no-progress && bun run main.ts' : 'bun run main.ts';
+			// The image's default `bun` user can't write node_modules into the bind-mounted dir
+			return [...commonFlags, '--user', 'root', 'oven/bun:1', 'sh', '-c', cmd];
 		}
 
 		case 'clojure': {
@@ -93,6 +91,34 @@ async function writeFiles(
 			}
 			await writeFile(join(dir, 'deps.edn'), `{:deps {${Object.entries(deps).map(([k, v]) => `${k} ${JSON.stringify(v)}`).join(' ')}}}`);
 			return [...commonFlags, 'clojure', 'clj', '-M', 'main.clj'];
+		}
+
+		case 'rust': {
+			// Cargo only earns its build overhead when there are crates to resolve
+			if (packages.length === 0) {
+				await writeFile(join(dir, 'main.rs'), code);
+				return [...commonFlags, 'rust:1-slim', 'sh', '-c', 'rustc -O -o main main.rs && ./main'];
+			}
+			await mkdir(join(dir, 'src'), { recursive: true });
+			await writeFile(join(dir, 'src', 'main.rs'), code);
+			await writeFile(join(dir, 'Cargo.toml'), cargoToml(packages));
+			return [...commonFlags, 'rust:1-slim', 'sh', '-c', 'cargo run --quiet --release'];
+		}
+
+		case 'cpp': {
+			await writeFile(join(dir, 'main.cpp'), code);
+			return [
+				...commonFlags,
+				'gcc:14',
+				'sh',
+				'-c',
+				'g++ -O2 -std=c++23 -o main main.cpp && ./main'
+			];
+		}
+
+		case 'assembly': {
+			await writeFile(join(dir, 'main.s'), code);
+			return [...commonFlags, 'gcc:14', 'sh', '-c', 'as -o main.o main.s && ld -o main main.o && ./main'];
 		}
 	}
 }
