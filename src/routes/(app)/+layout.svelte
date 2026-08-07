@@ -9,10 +9,10 @@
 		DropdownMenuItem,
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu/index.js';
-	import { Moon, Sun } from '@lucide/svelte';
+	import { Menu, Moon, Sun } from '@lucide/svelte';
 	import { toggleMode, mode } from 'mode-watcher';
 	import { browser } from '$app/environment';
-	import { invalidateAll } from '$app/navigation';
+	import { afterNavigate, invalidateAll } from '$app/navigation';
 	import type { LayoutData } from './$types.js';
 
 	let importInput: HTMLInputElement;
@@ -37,7 +37,17 @@
 
 	let sidebarWidth = $state(browser ? (Number(localStorage.getItem('sidebar-width')) || 256) : 256);
 
+	// Off-canvas sidebar state, only meaningful below the `md` breakpoint
+	let sidebarOpen = $state(false);
+
 	$effect(() => { localStorage.setItem('sidebar-width', String(sidebarWidth)); });
+
+	// Picking a problem should close the drawer on mobile
+	afterNavigate(() => { sidebarOpen = false; });
+
+	function onWindowKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape') sidebarOpen = false;
+	}
 
 	function startSidebarResize(e: MouseEvent) {
 		const startX = e.clientX;
@@ -56,12 +66,24 @@
 	}
 </script>
 
-<div class="flex h-screen flex-col overflow-hidden">
-	<!-- Top nav -->
-	<header class="flex h-12 shrink-0 items-center justify-between border-b border-border bg-card px-4">
-		<a href="/problem/1" class="text-sm font-semibold tracking-tight">Project Euler Portal</a>
+<svelte:window onkeydown={onWindowKeydown} />
 
-		<div class="flex items-center gap-2">
+<div class="flex h-dvh flex-col overflow-hidden">
+	<!-- Top nav -->
+	<header class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 md:px-4">
+		<div class="flex min-w-0 items-center gap-2">
+			<button
+				onclick={() => (sidebarOpen = !sidebarOpen)}
+				class="-ml-1 rounded p-1 text-muted-foreground hover:text-foreground md:hidden"
+				aria-label="Toggle problem list"
+				aria-expanded={sidebarOpen}
+			>
+				<Menu size={18} />
+			</button>
+			<a href="/problem/1" class="truncate text-sm font-semibold tracking-tight">Project Euler Portal</a>
+		</div>
+
+		<div class="flex shrink-0 items-center gap-2">
 			<button onclick={toggleMode} class="text-muted-foreground hover:text-foreground" aria-label="Toggle theme">
 				{#if mode.current === 'dark'}
 					<Sun size={16} />
@@ -81,7 +103,9 @@
 									class="h-7 w-7 rounded-full"
 								/>
 							{/if}
-							<span class="text-sm text-muted-foreground">{data.session.user.name}</span>
+							<span class="hidden text-sm text-muted-foreground sm:inline">
+								{data.session.user.name}
+							</span>
 						</button>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
@@ -106,11 +130,28 @@
 
 	<input bind:this={importInput} type="file" accept=".zip" class="hidden" onchange={handleImport} />
 
-	<!-- Body: sidebar + main -->
-	<div class="flex flex-1 overflow-hidden">
-		<ProblemSidebar problems={data.problems} solutionSummaries={data.solutionSummaries} width={sidebarWidth} />
+	<!-- Body: sidebar + main. Below `md` the sidebar is an off-canvas drawer. -->
+	<div class="relative flex flex-1 overflow-hidden">
+		{#if sidebarOpen}
+			<button
+				onclick={() => (sidebarOpen = false)}
+				class="absolute inset-0 z-20 bg-black/50 md:hidden"
+				aria-label="Close problem list"
+				tabindex="-1"
+			></button>
+		{/if}
+
 		<div
-			class="w-1 shrink-0 cursor-col-resize transition-colors hover:bg-primary/30"
+			style="--sidebar-width: {sidebarWidth}px"
+			class="absolute inset-y-0 left-0 z-30 flex w-72 max-w-[85%] shrink-0 transition-transform duration-200 ease-out shadow-xl md:shadow-none
+				md:static md:z-auto md:w-[var(--sidebar-width)] md:max-w-none md:translate-x-0 md:transition-none
+				{sidebarOpen ? 'translate-x-0' : '-translate-x-full'}"
+		>
+			<ProblemSidebar problems={data.problems} solutionSummaries={data.solutionSummaries} />
+		</div>
+
+		<div
+			class="hidden w-1 shrink-0 cursor-col-resize transition-colors hover:bg-primary/30 md:block"
 			onmousedown={startSidebarResize}
 			role="separator"
 			aria-label="Resize sidebar"

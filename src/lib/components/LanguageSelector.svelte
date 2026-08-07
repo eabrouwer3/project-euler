@@ -20,7 +20,7 @@
 <select
 	{value}
 	onchange={handleChange}
-	class="h-8 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+	class="h-8 min-w-0 max-w-40 rounded-md border border-input bg-background px-2 text-xs ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 md:max-w-none md:px-3 md:text-sm"
 >
 	{#each LANGUAGES as lang (lang)}
 		<option value={lang}>{LANGUAGE_LABELS[lang]}</option>
