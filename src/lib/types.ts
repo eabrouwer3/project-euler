@@ -1,4 +1,4 @@
-export type Language = 'python' | 'typescript' | 'clojure';
+export type Language = 'python' | 'typescript' | 'clojure' | 'rust' | 'cpp' | 'assembly';
 
 export type SolutionStatus = 'in_progress' | 'solved';
 

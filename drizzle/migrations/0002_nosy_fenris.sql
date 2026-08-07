@@ -1,0 +1,2 @@
+ALTER TABLE "solutions" DROP CONSTRAINT "language_check";--> statement-breakpoint
+ALTER TABLE "solutions" ADD CONSTRAINT "language_check" CHECK ("solutions"."language" IN ('python', 'typescript', 'clojure', 'rust', 'cpp', 'assembly'));
