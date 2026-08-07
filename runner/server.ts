@@ -8,19 +8,59 @@ import { cargoToml, parsePackageSpec, validatePackages, type Language } from '@e
 const PORT = 3001;
 const TIMEOUT_MS = 30_000;
 
-// Test gVisor availability once at startup
-let useGvisor = false;
-try {
-	execFileSync('runsc', ['--rootless', '--platform=ptrace', 'do', '--network=none', '--', 'echo', 'ok'], {
-		stdio: 'ignore',
-		timeout: 5000
-	});
-	useGvisor = true;
-	console.log('gVisor (runsc) available — sandboxing enabled');
-} catch {
-	// ponytail: no gVisor means no network isolation either (ulimit only caps CPU time);
-	// upgrade path is making runsc a hard requirement instead of a silent fallback
-	console.log('gVisor not available — running with ulimit only');
+/**
+ * Tried in gVisor's own order of preference: systrap replaced ptrace as the default
+ * platform in 2023 and ptrace survives only as a deprecated fallback. kvm is omitted
+ * because it needs /dev/kvm, which no managed container host exposes.
+ */
+const SANDBOX_PLATFORMS = ['systrap', 'ptrace'];
+
+/**
+ * `--network` is a *global* runsc flag; the `do` subcommand has never accepted one of its
+ * own. Passing it after `do` aborts with "flag provided but not defined: -network" before
+ * a sandbox is ever started, which is subtle enough that it reads as "gVisor unavailable".
+ */
+function sandboxCommand(platform: string, cmd: string): string {
+	return `runsc --rootless --network=none --platform=${platform} do -- sh -c ${JSON.stringify(cmd)}`;
+}
+
+/**
+ * Rootless runsc has to `clone(CLONE_NEWUSER)` itself into a new user namespace, so it only
+ * comes up on hosts that permit unprivileged user namespaces. A stock container seccomp
+ * profile denies that clone outright, which is why the failure text matters more than the
+ * boolean — without it the log cannot distinguish "runsc missing" from "host forbids it".
+ */
+function probeSandbox(): { platform: string } | { error: string } {
+	const failures: string[] = [];
+
+	for (const platform of SANDBOX_PLATFORMS) {
+		try {
+			execFileSync('sh', ['-c', sandboxCommand(platform, 'exit 0')], {
+				stdio: ['ignore', 'ignore', 'pipe'],
+				timeout: 15_000
+			});
+			return { platform };
+		} catch (err) {
+			const stderr = (err as { stderr?: Buffer }).stderr?.toString().trim();
+			failures.push(`${platform}: ${stderr || (err as Error).message}`);
+		}
+	}
+
+	return { error: failures.join(' | ') };
+}
+
+const probe = probeSandbox();
+const sandboxPlatform = 'platform' in probe ? probe.platform : null;
+
+if ('platform' in probe) {
+	console.log(`gVisor (runsc) sandbox enabled — platform=${probe.platform}`);
+} else if (process.env.REQUIRE_SANDBOX === '1') {
+	// Fail closed where the sandbox is meant to be load-bearing, rather than serving
+	// untrusted code with nothing but an rlimit in front of it.
+	console.error(`REQUIRE_SANDBOX=1 but gVisor is unavailable — ${probe.error}`);
+	process.exit(1);
+} else {
+	console.warn(`gVisor unavailable, running with ulimit only — ${probe.error}`);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -53,6 +93,14 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => console.log(`Runner listening on :${PORT}`));
 
+/**
+ * A solution runs in two phases because the sandbox has no network. `fetch` resolves
+ * dependencies with the network up but *outside* the sandbox, so it is restricted to
+ * downloading — no wheel builds, no npm lifecycle scripts, no build.rs. Everything that
+ * executes code the solution chose (including its dependencies') belongs in `run`.
+ */
+type Phases = { fetch?: string; run: string };
+
 async function execCode(
 	language: Language,
 	code: string,
@@ -61,15 +109,23 @@ async function execCode(
 ): Promise<{ stdout: string; stderr: string }> {
 	validatePackages(language, packages);
 
-	let cmd: string;
+	let phases: Phases;
 
 	switch (language) {
 		case 'python': {
 			await writeFile(join(dir, 'main.py'), code);
-			const withFlags = packages.map((p) => `--with ${p}`).join(' ');
-			cmd = packages.length > 0
-				? `uv run --python 3.13 ${withFlags} main.py`
-				: 'uv run --python 3.13 main.py';
+			// An sdist would run its build backend during install, i.e. outside the sandbox;
+			// wheels only keeps the fetch phase to unpacking archives.
+			// --quiet keeps uv's progress chatter out of the solution's stderr without
+			// hiding resolution failures, which the user does need to see.
+			const install =
+				packages.length > 0
+					? ` && uv pip install --quiet --python .venv/bin/python --only-binary=:all: ${packages.join(' ')}`
+					: '';
+			phases = {
+				fetch: `uv venv --quiet --python 3.13 .venv${install}`,
+				run: '.venv/bin/python main.py'
+			};
 			break;
 		}
 		case 'typescript': {
@@ -83,68 +139,79 @@ async function execCode(
 				join(dir, 'package.json'),
 				JSON.stringify({ name: 'solution', private: true, dependencies }, null, 2)
 			);
-			cmd =
-				packages.length > 0 ? 'bun install --no-progress && bun run main.ts' : 'bun run main.ts';
+			phases = {
+				fetch: packages.length > 0 ? 'bun install --no-progress --ignore-scripts' : undefined,
+				run: 'bun run main.ts'
+			};
 			break;
 		}
 		case 'clojure': {
 			await writeFile(join(dir, 'main.clj'), code);
-			const deps: Record<string, unknown> = {};
-			for (const pkg of packages) {
-				const [name, version = 'RELEASE'] = pkg.split('@');
-				deps[name] = { mvn: { version } };
-			}
-			await writeFile(
-				join(dir, 'deps.edn'),
-				`{:deps {${Object.entries(deps)
-					.map(([k, v]) => `${k} ${JSON.stringify(v)}`)
-					.join(' ')}}}`
-			);
-			cmd = 'clojure -M main.clj';
+			// A coordinate is `{:mvn/version "x"}` — one namespaced keyword, not a nested map.
+			// JSON.stringify would emit `{"mvn":{"version":"x"}}`, whose quoted keys the edn
+			// reader rejects outright ("Invalid token: :"), so it is spelled out here.
+			const deps = packages
+				.map((pkg) => {
+					const [name, version = 'RELEASE'] = pkg.split('@');
+					return `${name} {:mvn/version ${JSON.stringify(version)}}`;
+				})
+				.join(' ');
+			await writeFile(join(dir, 'deps.edn'), `{:deps {${deps}}}`);
+			// Unconditional: even a dependency-free solution resolves org.clojure/clojure itself,
+			// and -P stops after populating ~/.m2 and .cpcache without running main.clj.
+			phases = { fetch: 'clojure -P -M main.clj', run: 'clojure -M main.clj' };
 			break;
 		}
 		case 'rust': {
 			// Cargo only earns its build overhead when there are crates to resolve
 			if (packages.length === 0) {
 				await writeFile(join(dir, 'main.rs'), code);
-				cmd = 'rustc -O --edition 2024 -o main main.rs && ./main';
+				phases = { run: 'rustc -O --edition 2024 -o main main.rs && ./main' };
 				break;
 			}
 			await mkdir(join(dir, 'src'), { recursive: true });
 			await writeFile(join(dir, 'src', 'main.rs'), code);
 			await writeFile(join(dir, 'Cargo.toml'), cargoToml(packages));
-			cmd = 'cargo run --quiet --release';
+			// `fetch` downloads without building, so proc macros and build.rs stay sandboxed.
+			phases = { fetch: 'cargo fetch --quiet', run: 'cargo run --quiet --release --offline' };
 			break;
 		}
 		case 'cpp': {
 			await writeFile(join(dir, 'main.cpp'), code);
-			cmd = 'g++ -O2 -std=c++26 -o main main.cpp && ./main';
+			phases = { run: 'g++ -O2 -std=c++26 -o main main.cpp && ./main' };
 			break;
 		}
 		case 'assembly': {
 			await writeFile(join(dir, 'main.s'), code);
-			cmd = 'as -o main.o main.s && ld -o main main.o && ./main';
+			phases = { run: 'as -o main.o main.s && ld -o main main.o && ./main' };
 			break;
 		}
 	}
 
-	return spawnWithTimeout(cmd, dir);
+	return spawnWithTimeout(phases, dir);
 }
 
 function spawnWithTimeout(
-	cmd: string,
+	phases: Phases,
 	cwd: string
 ): Promise<{ stdout: string; stderr: string }> {
 	return new Promise((resolve, reject) => {
-		const sandboxedCmd = useGvisor
-			? `runsc --rootless --platform=ptrace do --network=none -- sh -c ${JSON.stringify(cmd)}`
-			: cmd;
+		const sandboxedCmd = sandboxPlatform
+			? sandboxCommand(sandboxPlatform, phases.run)
+			: phases.run;
 
-		const fullCmd = `ulimit -t 25; ${sandboxedCmd}`;
+		// The fetch phase writes into `cwd` on the real filesystem; the sandbox mounts that
+		// same tree read-only under a throwaway overlay, so the run phase sees what was
+		// downloaded and its own writes never escape.
+		const prefix = phases.fetch ? `${phases.fetch} && ` : '';
+		const fullCmd = `ulimit -t 25; ${prefix}${sandboxedCmd}`;
 
+		// Own process group: killing the shell alone would orphan whatever it had started,
+		// and under gVisor that means a leaked sentry still holding the solution's memory.
 		const proc = spawn('sh', ['-c', fullCmd], {
 			cwd,
-			env: { ...process.env, HOME: '/tmp' }
+			env: { ...process.env, HOME: '/tmp' },
+			detached: true
 		});
 
 		let stdout = '';
@@ -154,7 +221,13 @@ function spawnWithTimeout(
 		proc.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
 
 		const timer = setTimeout(() => {
-			proc.kill('SIGKILL');
+			// Negative pid targets the whole group; the shell may already be gone, leaving
+			// only the descendants that actually need killing.
+			try {
+				process.kill(-proc.pid!, 'SIGKILL');
+			} catch {
+				proc.kill('SIGKILL');
+			}
 			reject(new Error('Execution timed out after 30 seconds'));
 		}, TIMEOUT_MS);
 

@@ -1,7 +1,7 @@
 export type Language = 'python' | 'typescript' | 'clojure' | 'rust' | 'cpp' | 'assembly';
 
 /**
- * `uv run --with ${p}` is shell-interpolated (see server.ts), so this stays far more
+ * `uv pip install ${p}` is shell-interpolated (see server.ts), so this stays far more
  * conservative than real PEP 508 syntax — no ranges/extras/markers, since those rely on
  * shell-meaningful characters (`<`, `>`, `,`, `[`, `]`, spaces). Bare name or exact pin only.
  */

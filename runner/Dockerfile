@@ -2,15 +2,22 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Base tools + OpenJDK 21
+# Base tools + OpenJDK 21.
+# tini is here to reap: a timed-out solution is killed by process group, which leaves the
+# sandbox's own processes orphaned onto PID 1, and node never wait()s on children it did
+# not spawn — so without an init every timeout would strand a zombie.
 RUN apt-get update && apt-get install -y \
-    curl wget ca-certificates gnupg unzip \
+    curl wget ca-certificates gnupg unzip tini \
     openjdk-21-jdk \
     && rm -rf /var/lib/apt/lists/*
 
-# uv + Python 3.13
+# uv + Python 3.13.
+# The interpreter goes to an absolute, HOME-independent path: server.ts runs solutions with
+# HOME=/tmp, so a default install under /root would be invisible at runtime and uv would try
+# to re-download it — which the sandboxed, network-less run phase cannot do.
 RUN curl -fsSL https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
 RUN uv python install 3.13
 
 # Node 22
@@ -50,18 +57,22 @@ RUN curl -fsSL https://github.com/clojure/brew-install/releases/latest/download/
     && /tmp/clj-install.sh \
     && rm /tmp/clj-install.sh
 
-# gVisor (runsc) — server.ts auto-detects and falls back gracefully if unavailable
+# gVisor (runsc). server.ts probes it at startup and logs why it was rejected; set
+# REQUIRE_SANDBOX=1 to refuse to boot rather than fall back to ulimits alone. Note that
+# rootless runsc needs unprivileged user namespaces, so it stays unavailable on hosts whose
+# seccomp profile denies clone(CLONE_NEWUSER) — most managed container platforms.
 RUN curl -fsSL https://gvisor.dev/archive.key | gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
     > /etc/apt/sources.list.d/gvisor.list \
     && apt-get update && apt-get install -y runsc \
     && rm -rf /var/lib/apt/lists/*
 
-# Pre-warm Clojure Maven cache (bakes ~/.m2 into the image layer)
+# Pre-warm the Clojure Maven cache. HOME matches the value server.ts runs solutions under,
+# so the warmed repo lands in /tmp/.m2 where the fetch phase will actually find it.
 RUN mkdir -p /tmp/clj-warmup \
     && echo '(println "warmed")' > /tmp/clj-warmup/main.clj \
     && echo '{:deps {}}' > /tmp/clj-warmup/deps.edn \
-    && cd /tmp/clj-warmup && clojure -M main.clj \
+    && cd /tmp/clj-warmup && HOME=/tmp clojure -M main.clj \
     && rm -rf /tmp/clj-warmup
 
 WORKDIR /app
@@ -74,4 +85,5 @@ COPY runner/server.ts ./runner/
 
 WORKDIR /app/runner
 EXPOSE 3001
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "--experimental-strip-types", "server.ts"]
