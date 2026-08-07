@@ -16,6 +16,7 @@
  *   --runs=N   samples per phase (default 3)
  */
 import { Sandbox } from 'railway';
+import { connect } from 'node:net';
 
 const QUICK = process.argv.includes('--quick');
 const KEEP = process.argv.includes('--keep');
@@ -35,6 +36,28 @@ const CHECKPOINT = 'euler-bench-base';
 
 type Sample = { label: string; ms: number[] };
 const samples: Sample[] = [];
+
+/**
+ * The lifecycle calls are GraphQL over 443, but `exec` and `files` open a WebSocket to
+ * ssh.railway.com:2226. Restricted networks routinely allow the first and block the second,
+ * which surfaces as an opaque "WebSocket connection failed" only after a sandbox is already
+ * running and billing. Probe the port up front so the run can skip those phases and say why.
+ */
+function wsReachable(timeoutMs = 8000): Promise<boolean> {
+	const host = process.env.RAILWAY_TCP_PROXY_WS
+		? new URL(process.env.RAILWAY_TCP_PROXY_WS).hostname
+		: 'ssh.railway.com';
+	return new Promise((resolve) => {
+		const sock = connect({ host, port: 2226, timeout: timeoutMs });
+		const done = (ok: boolean) => {
+			sock.destroy();
+			resolve(ok);
+		};
+		sock.on('connect', () => done(true));
+		sock.on('error', () => done(false));
+		sock.on('timeout', () => done(false));
+	});
+}
 
 async function time<T>(label: string, fn: () => Promise<T>): Promise<T> {
 	const t0 = performance.now();
@@ -59,6 +82,9 @@ function toolchainTemplate() {
 			'ca-certificates',
 			'build-essential',
 			'binutils',
+			// bun's installer unpacks a zip and fails without this — the Dockerfile gets it
+			// from its own base layer, so the dependency is easy to lose in a port.
+			'unzip',
 			'openjdk-21-jdk-headless'
 		)
 		.withEnv({ UV_PYTHON_INSTALL_DIR: '/opt/uv/python' })
@@ -152,12 +178,19 @@ async function main() {
 	if (!process.env.RAILWAY_ENVIRONMENT_ID) throw new Error('set RAILWAY_ENVIRONMENT_ID');
 
 	const opts = { region: REGION, idleTimeoutMinutes: IDLE_MINUTES };
-	console.log(`region=${REGION} runs=${RUNS} quick=${QUICK}`);
+	const canExec = await wsReachable();
+	console.log(`region=${REGION} runs=${RUNS} quick=${QUICK} exec=${canExec ? 'yes' : 'BLOCKED'}`);
+	if (!canExec) {
+		console.log(
+			'ssh.railway.com:2226 unreachable — skipping exec/files phases.\n' +
+				'Lifecycle timings below are still real; run from an unrestricted network for e2e.'
+		);
+	}
 
 	// --- bare lifecycle: the floor, with no toolchains on disk ---
 	for (let i = 0; i < RUNS; i++) {
 		const sbx = await time('create (bare)', () => Sandbox.create(opts));
-		await time('exec round-trip (trivial)', () => sbx.exec('true'));
+		if (canExec) await time('exec round-trip (trivial)', () => sbx.exec('true'));
 		await time('destroy', () => sbx.destroy());
 	}
 
@@ -186,7 +219,7 @@ async function main() {
 	}
 
 	// --- end to end, per language: fork -> write -> run -> destroy ---
-	for (const s of SOLUTIONS) {
+	for (const s of canExec ? SOLUTIONS : []) {
 		for (let i = 0; i < RUNS; i++) {
 			await time(`e2e ${s.lang}`, async () => {
 				const fork = await base.fork(opts);
@@ -210,6 +243,16 @@ async function main() {
 	report();
 
 	const e2e = samples.filter((s) => s.label.startsWith('e2e')).flatMap((s) => s.ms);
+	if (e2e.length === 0) {
+		const forks = samples.find((s) => s.label.startsWith('fork'))?.ms ?? [];
+		if (forks.length) {
+			console.log(
+				`\nno e2e (exec blocked). Fork alone costs ${(Math.max(...forks) / 1000).toFixed(2)}s ` +
+					'of the 30s budget before the solution has run at all.'
+			);
+		}
+		return;
+	}
 	const worst = Math.max(...e2e) / 1000;
 	console.log(
 		`\nworst end-to-end: ${worst.toFixed(2)}s against a 30s budget — ` +
