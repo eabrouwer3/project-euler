@@ -51,7 +51,7 @@ export function cargoToml(packages: string[]): string {
 	return `[package]
 name = "solution"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 ${deps}

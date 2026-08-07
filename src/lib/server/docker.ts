@@ -97,7 +97,7 @@ async function writeFiles(
 			// Cargo only earns its build overhead when there are crates to resolve
 			if (packages.length === 0) {
 				await writeFile(join(dir, 'main.rs'), code);
-				return [...commonFlags, 'rust:1-slim', 'sh', '-c', 'rustc -O -o main main.rs && ./main'];
+				return [...commonFlags, 'rust:1-slim', 'sh', '-c', 'rustc -O --edition 2024 -o main main.rs && ./main'];
 			}
 			await mkdir(join(dir, 'src'), { recursive: true });
 			await writeFile(join(dir, 'src', 'main.rs'), code);
@@ -109,16 +109,16 @@ async function writeFiles(
 			await writeFile(join(dir, 'main.cpp'), code);
 			return [
 				...commonFlags,
-				'gcc:14',
+				'gcc:16',
 				'sh',
 				'-c',
-				'g++ -O2 -std=c++23 -o main main.cpp && ./main'
+				'g++ -O2 -std=c++26 -o main main.cpp && ./main'
 			];
 		}
 
 		case 'assembly': {
 			await writeFile(join(dir, 'main.s'), code);
-			return [...commonFlags, 'gcc:14', 'sh', '-c', 'as -o main.o main.s && ld -o main main.o && ./main'];
+			return [...commonFlags, 'gcc:16', 'sh', '-c', 'as -o main.o main.s && ld -o main main.o && ./main'];
 		}
 	}
 }

@@ -107,7 +107,7 @@ async function execCode(
 			// Cargo only earns its build overhead when there are crates to resolve
 			if (packages.length === 0) {
 				await writeFile(join(dir, 'main.rs'), code);
-				cmd = 'rustc -O -o main main.rs && ./main';
+				cmd = 'rustc -O --edition 2024 -o main main.rs && ./main';
 				break;
 			}
 			await mkdir(join(dir, 'src'), { recursive: true });
@@ -118,7 +118,7 @@ async function execCode(
 		}
 		case 'cpp': {
 			await writeFile(join(dir, 'main.cpp'), code);
-			cmd = 'g++ -O2 -std=c++23 -o main main.cpp && ./main';
+			cmd = 'g++ -O2 -std=c++26 -o main main.cpp && ./main';
 			break;
 		}
 		case 'assembly': {

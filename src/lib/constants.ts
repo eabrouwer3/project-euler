@@ -45,7 +45,7 @@ export const LANGUAGE_LABELS: Record<Language, string> = {
 	typescript: 'TypeScript (Bun 1)',
 	clojure: 'Clojure 1.12 (Java 21)',
 	rust: 'Rust (stable)',
-	cpp: 'C++23 (GCC 14)',
+	cpp: 'C++26 (GCC 16)',
 	assembly: 'x86-64 Assembly (GNU as)'
 };
 
