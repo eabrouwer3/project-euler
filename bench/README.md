@@ -31,23 +31,39 @@ Requires Sandboxes, which are gated behind
 
 The verdict line at the end compares the worst end-to-end against the 30s budget.
 
-## Verdict — Sandboxes fit, comfortably
+## Verdict — Sandboxes fit
 
-Worst end-to-end **6.87s against the 30s budget**. Per-language, provisioning from a checkpoint:
+**All six languages run correctly on Sandboxes.** Worst end-to-end observed is 20.69s against
+a 30s budget, but that run carried a 2.4s/sandbox penalty since removed (see below), and its
+per-language numbers were distorted by grouped sampling. Re-measure before trusting a table.
 
-| language | min | median | max |
+Current lifecycle, after removing the create-time `env` penalty:
+
+| phase | min | median | max |
 |---|---|---|---|
-| python | 3.77s | 4.09s | 5.13s |
-| typescript | 3.24s | 3.54s | 5.65s |
-| clojure | 5.51s | 6.00s | 6.04s |
-| rust | 4.04s | 4.49s | 6.87s | (not yet valid — see PATH) |
-| cpp | 2.91s | 3.13s | 3.14s | (not yet valid — see PATH) |
-| assembly | 3.04s | 3.12s | 3.78s |
+| create (bare) | 2.05s | 2.08s | 2.33s |
+| create (from template) | 1.91s | 1.96s | 2.08s |
+| create (from checkpoint) | 1.66s | **1.83s** | 2.08s |
+| fork (from warm base) | 2.91s | 2.98s | 3.75s |
+| checkpoint capture | — | 1.12s | — |
+| destroy | 0.14s | 0.15s | 0.17s |
+| exec round-trip | 0.61s | 0.62s | 0.64s |
 
-`exec` round-trip is ~0.61s. Fixed provisioning overhead is ~2.3–2.6s (checkpoint restore).
+Checkpoint restore remains the fastest way in, and needs no permanently running base.
 
-Clojure's earlier 3x spread is gone (20.85s → 6.04s) now that its classpath cache is warmed in
-`/app` rather than `/tmp`. Rust and cpp figures are provisioning plus a fast failure, not work.
+### Never pass `env` at create time
+
+Setting `env` on create costs **2.41s per sandbox** — median 4.34s versus 1.93s in an
+interleaved A/B (`--runs=6`). It is the tidy-looking way to give a sandbox its PATH and it
+roughly doubles provisioning. Pass `env` to `exec` instead, where per-command variables travel
+inside the command string and cost nothing. The docs' caveat that this exposes values to `ps`
+is irrelevant for a PATH; it would matter for a secret.
+
+### Sample round-robin, not grouped
+
+Provisioning latency drifts over minutes. Taking all samples of one language back to back
+charges that drift to whichever language held the slow window — which is how clojure appeared
+to regress 3x between runs where nothing about clojure changed. The benchmark now interleaves.
 
 ## Results — 2026-08-07, us-east4-eqdc4a, 3 runs/phase
 

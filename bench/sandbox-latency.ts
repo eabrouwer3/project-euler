@@ -39,8 +39,11 @@ const IDLE_MINUTES = 1;
  * wearing three masks: g++ "cannot execute cc1plus", collect2 "cannot find ld", and rustc
  * "linker `cc` not found". None of them appear during a template build, which has a normal PATH.
  *
- * Baking it at create time fixes every command in the sandbox at once, rather than prefixing
- * each one and waiting to be surprised by the next tool that shells out.
+ * Applied per-exec, not via `env` at create time. Baking it in at create looked tidier and
+ * measured 2.41s slower per sandbox in an interleaved A/B (median 4.34s vs 1.93s) — the
+ * create path evidently does real work to persist variables. Per-command env travels inside
+ * the command string, so it is free; the docs' caveat that this makes values visible to `ps`
+ * costs nothing for a PATH.
  */
 const SANDBOX_ENV = {
 	PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.cargo/bin:/root/.local/bin'
@@ -218,7 +221,7 @@ async function main() {
 	if (!process.env.RAILWAY_API_TOKEN) throw new Error('set RAILWAY_API_TOKEN');
 	if (!process.env.RAILWAY_ENVIRONMENT_ID) throw new Error('set RAILWAY_ENVIRONMENT_ID');
 
-	const opts = { region: REGION, idleTimeoutMinutes: IDLE_MINUTES, env: SANDBOX_ENV };
+	const opts = { region: REGION, idleTimeoutMinutes: IDLE_MINUTES };
 	const canExec = await wsReachable();
 	console.log(`region=${REGION} runs=${RUNS} quick=${QUICK} exec=${canExec ? 'yes' : 'BLOCKED'}`);
 	if (!canExec) {
@@ -231,7 +234,7 @@ async function main() {
 	// --- bare lifecycle: the floor, with no toolchains on disk ---
 	for (let i = 0; i < RUNS; i++) {
 		const sbx = await time('create (bare)', () => Sandbox.create(opts));
-		if (canExec) await time('exec round-trip (trivial)', () => sbx.exec('true'));
+		if (canExec) await time('exec round-trip (trivial)', () => sbx.exec('true', { env: SANDBOX_ENV }));
 		await time('destroy', () => sbx.destroy());
 	}
 
@@ -262,19 +265,23 @@ async function main() {
 	// --- end to end, per language ---
 	// Provisions from the checkpoint rather than forking the base: it measured ~2.4s faster
 	// and needs no permanently running base sandbox, so it is the shape a port should use.
+	// Round-robin across languages rather than all samples of one language back to back.
+	// Railway's provisioning latency drifts over minutes, and grouped sampling charges that
+	// drift entirely to whichever language occupied the slow window — which is how clojure
+	// came to look 3x worse than a run where nothing about clojure had changed.
 	let diagnosed = false;
-	for (const s of canExec ? SOLUTIONS : []) {
-		for (let i = 0; i < RUNS; i++) {
+	for (let i = 0; i < RUNS; i++) {
+		for (const s of canExec ? SOLUTIONS : []) {
 			await time(`e2e ${s.lang}`, async () => {
 				const sbx = await Sandbox.create(CHECKPOINT, opts);
 				try {
 					await sbx.files.write(`/app/${s.file}`, s.code);
-					const r = await sbx.exec(s.cmd, { cwd: '/app', timeoutSec: 30 });
+					const r = await sbx.exec(s.cmd, { cwd: '/app', timeoutSec: 30, env: SANDBOX_ENV });
 					if (!r.stdout.includes('233168')) {
 						console.error(`  ! ${s.lang} wrong output: ${r.stdout.trim()} ${r.stderr.trim()}`);
 						if (!diagnosed) {
 							diagnosed = true;
-							const d = await sbx.exec(DIAGNOSTIC, { timeoutSec: 60 });
+							const d = await sbx.exec(DIAGNOSTIC, { timeoutSec: 60, env: SANDBOX_ENV });
 							console.error(`--- diagnostic (${s.lang}) ---\n${d.stdout}${d.stderr}---`);
 						}
 					}
