@@ -1,5 +1,9 @@
 import { error, redirect } from '@sveltejs/kit';
-import { getProblemHtml } from '$lib/server/problems.js';
+import {
+	getProblemAttachments,
+	getProblemHtml,
+	prefetchProblemAttachments
+} from '$lib/server/problems.js';
 import { warmSandbox } from '$lib/server/sandbox.js';
 import { db } from '$lib/server/db.js';
 import { solutions } from '../../../../../../drizzle/schema.js';
@@ -22,8 +26,10 @@ export const load: PageServerLoad = async (event) => {
 	// boots its own if this failed or Railway reaped it before they pressed Run.
 	if (session?.user?.id) warmSandbox(session.user.id);
 
-	const [problemHtml, savedSolution] = await Promise.all([
+	const [problemHtml, attachments, savedSolution] = await Promise.all([
 		getProblemHtml(problemId),
+		// Metadata only — the contents are warmed below rather than shipped to the browser.
+		getProblemAttachments(problemId),
 		session?.user?.id
 			? db
 					.select()
@@ -40,10 +46,14 @@ export const load: PageServerLoad = async (event) => {
 			: Promise.resolve(null)
 	]);
 
+	// Pull the problem's data files while it is being read, so the first run finds them cached.
+	if (attachments.length > 0) prefetchProblemAttachments(problemId);
+
 	return {
 		problemId,
 		language,
 		problemHtml,
+		attachments,
 		code: savedSolution?.code ?? BOILERPLATE[language],
 		packages: (savedSolution?.packages as string[]) ?? [],
 		status: (savedSolution?.status as SolutionStatus) ?? null

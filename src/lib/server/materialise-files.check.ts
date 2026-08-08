@@ -39,11 +39,11 @@ function realise(files: Record<string, string>): Record<string, string> {
 	}
 }
 
-/** A trailing newline is added by the heredoc; compare on that basis rather than pretending not. */
+/** Byte-for-byte, trailing newline included: a data file's last byte is part of its data. */
 function assertRoundTrip(label: string, files: Record<string, string>): void {
 	const out = realise(files);
 	for (const [name, content] of Object.entries(files)) {
-		assert(out[name] === `${content}\n`, `${label}: ${name} did not round-trip (got ${JSON.stringify(out[name])})`);
+		assert(out[name] === content, `${label}: ${name} did not round-trip (got ${JSON.stringify(out[name])})`);
 	}
 }
 
@@ -64,6 +64,17 @@ assertRoundTrip('heredoc-shaped content', {
 	'main.py': ['EOF', 'EULER_EOF', "print('EOF')", 'EULER_EOF_0000000000000000'].join('\n')
 });
 
+// A problem's data file is written the same way a solution is, and its trailing byte is data:
+// problem 67's triangle ends in a newline that must not be doubled into an empty final row,
+// while problem 22's name list ends mid-quote and must not gain one at all.
+assertRoundTrip('data file ending in a newline', {
+	'triangle.txt': '59\n73 41\n52 40 09\n'
+});
+assertRoundTrip('data file ending without a newline', {
+	'names.txt': '"MARY","PATRICIA","LINDA"'
+});
+assertRoundTrip('empty file', { 'empty.txt': '' });
+
 // Rust is the one language written into a subdirectory, so the mkdir path is exercised too.
 assertRoundTrip('nested paths', {
 	'src/main.rs': 'fn main() { println!("{}", 1); }',
@@ -79,7 +90,7 @@ assert(materialiseFiles({}) === '', 'no files should produce an empty prelude');
 
 // Two files in one prelude must get distinct delimiters and not bleed into each other.
 const multi = realise({ 'a.txt': 'alpha', 'b.txt': 'beta' });
-assert(multi['a.txt'] === 'alpha\n' && multi['b.txt'] === 'beta\n', 'multiple files bled together');
+assert(multi['a.txt'] === 'alpha' && multi['b.txt'] === 'beta', 'multiple files bled together');
 
 // --- the full script a run sends -------------------------------------------------------------
 

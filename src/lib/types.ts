@@ -8,6 +8,16 @@ export type SolutionSummary = {
 	status: SolutionStatus;
 };
 
+/**
+ * A data file a problem hands out. `name` is what it is called in the run's working directory,
+ * `aliases` are the other spellings of it that are symlinked alongside.
+ */
+export type ProblemAttachment = {
+	name: string;
+	aliases: string[];
+	url: string;
+};
+
 export type Problem = {
 	id: number;
 	title: string;

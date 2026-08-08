@@ -80,3 +80,35 @@ export const MONACO_LANGUAGE: Record<Language, string> = {
 	cpp: 'cpp',
 	assembly: 'plaintext'
 };
+
+/**
+ * What a run writes for the solution itself: the source file the editor's contents land in, and
+ * the manifest carrying its packages where the toolchain needs one. Rust is the odd one — Cargo
+ * insists on `src/main.rs`, while a solution with no crates is compiled straight from a file in
+ * the working directory.
+ *
+ * Named here rather than only inside run-code so the editor can tell the reader what their code
+ * is called on disk — which they need the moment a problem hands them a data file to open —
+ * without the two drifting apart.
+ */
+export function solutionFiles(
+	language: Language,
+	packages: string[]
+): { source: string; manifest?: string } {
+	switch (language) {
+		case 'python':
+			return { source: 'main.py' };
+		case 'typescript':
+			return { source: 'main.ts', manifest: 'package.json' };
+		case 'clojure':
+			return { source: 'main.clj', manifest: 'deps.edn' };
+		case 'rust':
+			return packages.length > 0
+				? { source: 'src/main.rs', manifest: 'Cargo.toml' }
+				: { source: 'main.rs' };
+		case 'cpp':
+			return { source: 'main.cpp' };
+		case 'assembly':
+			return { source: 'main.s' };
+	}
+}

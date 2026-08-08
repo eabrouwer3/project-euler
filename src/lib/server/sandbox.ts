@@ -230,7 +230,7 @@ function withDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T>
 	return Promise.race([work, expiry]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
 	return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
@@ -242,6 +242,11 @@ function shellQuote(value: string): string {
  *
  * The heredoc delimiter is quoted, which stops the shell expanding anything in the body, and
  * randomised so no solution can end a heredoc early by containing the delimiter as a line.
+ *
+ * Files land byte-for-byte, trailing newline included — problem 22's `names.txt` ends mid-quote
+ * with no newline at all, and a solution that split its contents and stripped the quotes would
+ * carry a stray `\n` into the last name's score. Callers that want a trailing newline (every
+ * generated source does) put one in the content.
  */
 export function materialiseFiles(files: Record<string, string>): string {
 	const parts: string[] = [];
@@ -251,7 +256,13 @@ export function materialiseFiles(files: Record<string, string>): string {
 		if (slash !== -1) parts.push(`mkdir -p ${shellQuote(name.slice(0, slash))}`);
 
 		const delimiter = `EULER_EOF_${randomBytes(8).toString('hex')}`;
-		parts.push(`cat > ${shellQuote(name)} <<'${delimiter}'\n${content}\n${delimiter}`);
+		// A heredoc body always ends in a newline, so the one the content already carries is left
+		// to the terminator, and content that carries none has the extra byte cut back off.
+		const endsWithNewline = content.endsWith('\n');
+		const body = endsWithNewline ? content.slice(0, -1) : content;
+
+		parts.push(`cat > ${shellQuote(name)} <<'${delimiter}'\n${body}\n${delimiter}`);
+		if (!endsWithNewline) parts.push(`truncate -s -1 ${shellQuote(name)}`);
 	}
 
 	return parts.join('\n');
