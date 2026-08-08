@@ -39,7 +39,15 @@ Docker Compose provides PostgreSQL at `localhost:5432` with default credentials 
 
 **Stack:** Bun (runtime + package manager), SvelteKit 2 + Svelte 5, TypeScript, Tailwind CSS 4, shadcn/ui (bits-ui), Drizzle ORM, PostgreSQL, Auth.js (GitHub OAuth), Monaco Editor, KaTeX, Docker for code execution.
 
-**Runtime:** The app is built with `svelte-adapter-bun` and served with `bun ./build/index.js`. The runner service (`runner/server.ts`) is executed directly by Bun — no transpile step, no Node in its image. `runner/` and `shared/` are Bun workspaces of the root package; the runner image installs only its own workspace via `bun install --filter euler-runner`.
+**Runtime:** Everything runs on Bun, but the app deliberately keeps the
+first-party `@sveltejs/adapter-node` rather than a Bun-specific adapter — its
+`node:http` output runs fine under Bun (`bun ./build/index.js`), so there is no
+reason to trade core-team maintenance for a community package at this traffic
+level. Revisit only if you need `Bun.serve` natively (WebSockets, throughput).
+The runner service (`runner/server.ts`) is executed directly by Bun — no
+transpile step, no Node in its image. `runner/` and `shared/` are Bun
+workspaces of the root package; the runner image installs only its own
+workspace via `bun install --filter euler-runner`.
 
 **Routing layout groups:**
 - `(app)/` — main app shell with sidebar navigation; requires auth
