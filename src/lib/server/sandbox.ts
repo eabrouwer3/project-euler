@@ -50,16 +50,31 @@ const SANDBOX_ENV = {
 export const WORKDIR = '/app';
 
 /**
+ * The names the SDK itself resolves a credential from, in its own precedence order: a project
+ * token first, then an account token. Listing them here rather than checking one hard-coded
+ * name keeps this preflight from rejecting a service the SDK would have authenticated fine.
+ */
+const TOKEN_VARS = ['RAILWAY_TOKEN', 'RAILWAY_API_TOKEN'];
+
+/**
  * Checked per-run rather than at boot. When this lived in a dedicated runner service, missing
  * credentials meant that process had no purpose and exiting was right; here the same failure
  * would take down a site whose problem browsing, editor and saved solutions all work fine
  * without a sandbox. So running code fails loudly with a usable message and the rest serves.
+ *
+ * The message names the variables it wants because the failure it reports is almost always a
+ * misnamed one, and a sandbox credential is invisible from the outside: nothing else on the
+ * site degrades, so the only evidence is this string.
  */
 function requireCredentials(): void {
-	const missing = ['RAILWAY_API_TOKEN', 'RAILWAY_ENVIRONMENT_ID'].filter((k) => !process.env[k]);
+	const missing: string[] = [];
+	if (!TOKEN_VARS.some((k) => process.env[k])) missing.push(TOKEN_VARS.join(' or '));
+	// Injected into every deployed service by Railway, so this is only ever unset locally.
+	if (!process.env.RAILWAY_ENVIRONMENT_ID) missing.push('RAILWAY_ENVIRONMENT_ID');
+
 	if (missing.length > 0) {
 		throw new Error(
-			`Code execution is unavailable: ${missing.join(' and ')} not set on this service.`
+			`Code execution is unavailable: set ${missing.join(' and ')} on this service.`
 		);
 	}
 }
