@@ -1,9 +1,20 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { LANGUAGE_ABBR } from '$lib/constants.js';
-	import type { Problem, SolutionSummary } from '$lib/types.js';
+	import type { Problem, ProblemDifficulty, SolutionSummary } from '$lib/types.js';
 
 	type FilterOption = 'all' | 'not_started' | 'in_progress' | 'solved';
+
+	/**
+	 * Colour alone, where a solution's language is a filled chip: the two sit side by side, and a
+	 * second green pill next to the green "solved" one would read as another status.
+	 */
+	function difficultyClass({ percent }: ProblemDifficulty): string {
+		if (percent < 15) return 'text-green-600 dark:text-green-400';
+		if (percent < 35) return 'text-amber-600 dark:text-amber-400';
+		if (percent < 60) return 'text-orange-600 dark:text-orange-400';
+		return 'text-red-600 dark:text-red-400';
+	}
 
 	let {
 		problems,
@@ -75,20 +86,28 @@
 					{String(problem.id).padStart(4, '0')}
 				</span>
 				<span class="truncate">{problem.title}</span>
-				{#if chips.length > 0}
-					<span class="ml-auto flex shrink-0 gap-1">
-						{#each chips as chip (chip.language)}
-							<span
-								class="rounded px-1 py-0.5 font-mono text-[10px] leading-none
-									{chip.status === 'solved'
-									? 'bg-green-500/20 text-green-600 dark:text-green-400'
-									: 'bg-blue-500/20 text-blue-500 dark:text-blue-400'}"
-							>
-								{LANGUAGE_ABBR[chip.language]}
-							</span>
-						{/each}
-					</span>
-				{/if}
+				<span class="ml-auto flex shrink-0 items-center gap-1">
+					{#if problem.difficulty}
+						<span
+							title="Difficulty: level {problem.difficulty.level} ({problem.difficulty.percent}%)"
+							class="font-mono text-[10px] font-medium leading-none {difficultyClass(
+								problem.difficulty
+							)}"
+						>
+							L{problem.difficulty.level}
+						</span>
+					{/if}
+					{#each chips as chip (chip.language)}
+						<span
+							class="rounded px-1 py-0.5 font-mono text-[10px] leading-none
+								{chip.status === 'solved'
+								? 'bg-green-500/20 text-green-600 dark:text-green-400'
+								: 'bg-blue-500/20 text-blue-500 dark:text-blue-400'}"
+						>
+							{LANGUAGE_ABBR[chip.language]}
+						</span>
+					{/each}
+				</span>
 			</a>
 		{/each}
 	</nav>

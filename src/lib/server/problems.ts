@@ -1,4 +1,5 @@
 import type { Problem, ProblemAttachment } from '$lib/types.js';
+import { difficultyOf } from './difficulty.js';
 
 const SITE = 'https://projecteuler.net/';
 
@@ -24,11 +25,14 @@ export async function getAllProblems(): Promise<Problem[]> {
 	const data = rows
 		.map((str) => {
 			const [id, title, published, solvedBy] = str.split('##');
+			const problemId = parseInt(id, 10);
 			return {
-				id: parseInt(id, 10),
+				id: problemId,
 				title,
 				published: new Date(parseInt(published, 10) * 1000),
-				solvedBy: parseInt(solvedBy, 10)
+				solvedBy: parseInt(solvedBy, 10),
+				// The list feed does not carry the rating, so it comes from the checked-in snapshot.
+				difficulty: difficultyOf(problemId)
 			} satisfies Problem;
 		})
 		.filter((p) => !isNaN(p.id))

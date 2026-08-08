@@ -18,9 +18,21 @@ export type ProblemAttachment = {
 	url: string;
 };
 
+/**
+ * How hard Project Euler rates a problem. The two numbers are the same measure: `percent` is the
+ * rating the site computes, `level` the band it falls in — both are shown as `Level 5 [13%]` on
+ * the problem's own page.
+ */
+export type ProblemDifficulty = {
+	level: number;
+	percent: number;
+};
+
 export type Problem = {
 	id: number;
 	title: string;
 	published: Date;
 	solvedBy: number;
+	/** Absent until enough members have solved the problem for a rating to be published. */
+	difficulty?: ProblemDifficulty;
 };

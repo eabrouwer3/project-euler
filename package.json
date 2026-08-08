@@ -9,7 +9,8 @@
     "preview": "bunx --bun vite preview",
     "db:generate": "bunx --bun drizzle-kit generate",
     "db:migrate": "bunx --bun drizzle-kit migrate",
-    "test": "bun src/lib/server/validate-packages.check.ts && bun src/lib/server/materialise-files.check.ts && bun src/lib/server/problem-resources.check.ts"
+    "difficulty:sync": "bun scripts/sync-difficulty.ts",
+    "test": "bun src/lib/server/validate-packages.check.ts && bun src/lib/server/materialise-files.check.ts && bun src/lib/server/problem-resources.check.ts && bun src/lib/server/difficulty.check.ts"
   },
   "dependencies": {
     "@auth/sveltekit": "^1.7.4",
