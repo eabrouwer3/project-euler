@@ -31,25 +31,47 @@ Requires Sandboxes, which are gated behind
 
 The verdict line at the end compares the worst end-to-end against the 30s budget.
 
-## Verdict — Sandboxes fit
+## Verdict — Sandboxes fit comfortably
 
-**All six languages run correctly on Sandboxes.** Worst end-to-end observed is 20.69s against
-a 30s budget, but that run carried a 2.4s/sandbox penalty since removed (see below), and its
-per-language numbers were distorted by grouped sampling. Re-measure before trusting a table.
+**All six languages run correctly, worst end-to-end 6.23s against a 30s budget.** Measured
+with PATH set per-exec and round-robin sampling; spreads are 1.1–1.3x max/min, so these are
+the first per-language numbers worth quoting.
 
-Current lifecycle, after removing the create-time `env` penalty:
+| language | min | median | max |
+|---|---|---|---|
+| python | 3.63s | 3.77s | 4.29s |
+| typescript | 3.58s | 3.90s | 3.91s |
+| clojure | 5.68s | 5.70s | 6.23s |
+| rust | 4.66s | 4.91s | 5.94s |
+| cpp | 4.03s | 4.27s | 4.47s |
+| assembly | 3.79s | 3.87s | 4.40s |
 
 | phase | min | median | max |
 |---|---|---|---|
-| create (bare) | 2.05s | 2.08s | 2.33s |
-| create (from template) | 1.91s | 1.96s | 2.08s |
-| create (from checkpoint) | 1.66s | **1.83s** | 2.08s |
-| fork (from warm base) | 2.91s | 2.98s | 3.75s |
-| checkpoint capture | — | 1.12s | — |
-| destroy | 0.14s | 0.15s | 0.17s |
-| exec round-trip | 0.61s | 0.62s | 0.64s |
+| create (bare) | 2.02s | 2.21s | 2.45s |
+| create (from template) | 2.13s | 2.57s | 3.78s |
+| create (from checkpoint) | 1.60s | **1.74s** | 1.79s |
+| fork (from warm base) | 2.67s | 3.18s | 3.82s |
+| checkpoint capture | — | 1.05s | — |
+| destroy | 0.12s | 0.14s | 0.16s |
+| exec round-trip | 0.61s | 0.62s | 0.63s |
 
-Checkpoint restore remains the fastest way in, and needs no permanently running base.
+Checkpoint restore is the fastest way in and needs no permanently running base. Roughly 2.4s
+of each end-to-end figure is provisioning; the rest is the language's own startup and compile.
+
+## C++26 on the Debian base — not a blocker
+
+`runner/Dockerfile` gets C++26 from GCC 16 via an Ubuntu-only PPA, which has no equivalent on
+the sandbox's Debian trixie base. It turns out not to matter:
+
+- **Stock g++ 14 already accepts `-std=c++26`** and compiles `<print>` and `<ranges>` to the
+  correct answer — verified, not assumed.
+- **`apt-get install -y g++-15` succeeds** on the base image, so GCC 15 is available if the
+  extra C++26 coverage is wanted.
+
+Install g++-15 with an explicit `.run('apt-get install -y g++-15')` step. Passing it through
+`.withPackages()` failed in probing for reasons not chased down; the explicit run step is
+verified working.
 
 ### Never pass `env` at create time
 
