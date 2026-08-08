@@ -34,7 +34,7 @@ export const POST: RequestHandler = async (event) => {
 	const runPackages = (saved[0]?.packages as string[]) ?? [];
 
 	try {
-		const result = await runCode(language, runCodeStr, runPackages);
+		const result = await runCode(session.user.id, language, runCodeStr, runPackages);
 		return json(result);
 	} catch (err) {
 		return json({ stdout: '', stderr: String(err) }, { status: 500 });

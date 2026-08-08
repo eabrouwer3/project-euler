@@ -1,5 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
 import { getProblemHtml } from '$lib/server/problems.js';
+import { warmSandbox } from '$lib/server/sandbox.js';
 import { db } from '$lib/server/db.js';
 import { solutions } from '../../../../../../drizzle/schema.js';
 import { and, eq } from 'drizzle-orm';
@@ -15,6 +16,11 @@ export const load: PageServerLoad = async (event) => {
 	if (!LANGUAGES.includes(language)) redirect(302, `/problem/${event.params.id}/python`);
 
 	const session = await event.locals.auth();
+
+	// Boot this user's sandbox while they read the problem, so their first run does not pay for
+	// it. Not awaited, and never fatal: the page renders fine without one, and the run path
+	// boots its own if this failed or Railway reaped it before they pressed Run.
+	if (session?.user?.id) warmSandbox(session.user.id);
 
 	const [problemHtml, savedSolution] = await Promise.all([
 		getProblemHtml(problemId),

@@ -11,6 +11,7 @@ const TIMEOUT_SEC = 30;
  * sandboxes — plus a local-Docker path here that had already drifted from it. Both are gone.
  */
 export async function runCode(
+	userId: string,
 	language: Language,
 	code: string,
 	packages: string[]
@@ -88,7 +89,7 @@ export async function runCode(
 		}
 	}
 
-	const { stdout, stderr, timedOut } = await runInSandbox(files, command, TIMEOUT_SEC);
+	const { stdout, stderr, timedOut } = await runInSandbox(userId, files, command, TIMEOUT_SEC);
 
 	if (timedOut) {
 		return { stdout, stderr: `Execution timed out after ${TIMEOUT_SEC} seconds\n${stderr}` };
