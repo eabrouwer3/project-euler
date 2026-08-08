@@ -7,12 +7,12 @@
     "runner"
   ],
   "scripts": {
-    "start": "node build/index.js",
-    "dev": "vite dev",
-    "build": "vite build",
-    "preview": "vite preview",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "start": "bun ./build/index.js",
+    "dev": "bunx --bun vite dev",
+    "build": "bunx --bun vite build",
+    "preview": "bunx --bun vite preview",
+    "db:generate": "bunx --bun drizzle-kit generate",
+    "db:migrate": "bunx --bun drizzle-kit migrate"
   },
   "dependencies": {
     "@auth/sveltekit": "^1.7.4",
@@ -33,7 +33,7 @@
   "devDependencies": {
     "@internationalized/date": "^3.12.0",
     "@lucide/svelte": "^1.7.0",
-    "@sveltejs/adapter-node": "^5.2.12",
+    "@sveltejs/adapter-node": "^5.5.7",
     "@sveltejs/kit": "^2.16.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "bits-ui": "^2.17.2",

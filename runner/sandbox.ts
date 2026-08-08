@@ -169,6 +169,24 @@ async function acquire(): Promise<() => void> {
 export type SandboxRun = { stdout: string; stderr: string; timedOut: boolean };
 
 /**
+ * `timeoutSec` on exec only bounds the command once it is running inside the sandbox. Reaching
+ * the sandbox at all is a WebSocket to Railway's tcp-proxy, and when that is unreachable the
+ * call can hang indefinitely rather than failing — observed under Bun, where a blocked proxy
+ * port produced no error at all while Node surfaced one immediately. Without an outer deadline
+ * a single unreachable proxy pins a concurrency slot and leaves a VM billing until its idle
+ * timeout.
+ */
+function withDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout>;
+	const expiry = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error(`${what} exceeded ${Math.round(ms / 1000)}s`)), ms);
+		// Don't hold the process open just to enforce a deadline that may never fire.
+		timer.unref?.();
+	});
+	return Promise.race([work, expiry]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+/**
  * Boots a sandbox from the checkpoint, writes the solution's files, runs one command, and
  * destroys it. Restoring from a checkpoint measured ~1.7s against ~3.2s to fork a warm base,
  * and needs no base sandbox sitting there billing between submissions.
@@ -187,17 +205,19 @@ export async function runInSandbox(
 	});
 
 	try {
-		await Promise.all(
-			Object.entries(files).map(([name, content]) =>
-				sandbox.files.write(`${WORKDIR}/${name}`, content)
-			)
+		// Budget: the command's own allowance plus room for file upload and connection setup.
+		const result = await withDeadline(
+			(async () => {
+				await Promise.all(
+					Object.entries(files).map(([name, content]) =>
+						sandbox.files.write(`${WORKDIR}/${name}`, content)
+					)
+				);
+				return sandbox.exec(command, { cwd: WORKDIR, timeoutSec, env: SANDBOX_ENV });
+			})(),
+			(timeoutSec + 30) * 1000,
+			'sandbox run'
 		);
-
-		const result = await sandbox.exec(command, {
-			cwd: WORKDIR,
-			timeoutSec,
-			env: SANDBOX_ENV
-		});
 
 		return { stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut };
 	} finally {

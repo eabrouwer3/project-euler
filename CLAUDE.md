@@ -6,19 +6,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Development
-mise run dev          # Start dev server (or: npm run dev)
-mise run build        # Build for production
-mise run start        # Start production server
+bun install           # Install dependencies
+bun run dev           # Start dev server
+bun run build         # Build for production
+bun run start         # Start production server (bun ./build/index.js)
 
 # Database
-npm run db:generate   # Generate Drizzle migrations after schema changes
-npm run db:migrate    # Apply pending migrations
+bun run db:generate   # Generate Drizzle migrations after schema changes
+bun run db:migrate    # Apply pending migrations
 
 # Infrastructure
 docker compose up -d  # Start PostgreSQL
 ```
 
-Always run `mise use` (not `nvm use`) before executing node/npm commands.
+Always run `mise use` before executing bun commands. This project runs on Bun,
+not Node — do not use `npm`/`npx`, and do not create a `package-lock.json`
+(`bun.lock` is the lockfile). The `dev`/`build`/`preview`/`db:*` scripts wrap
+their tools in `bunx --bun` so they execute on the Bun runtime rather than
+falling back to Node.
 
 ## Environment Setup
 
@@ -32,7 +37,17 @@ Docker Compose provides PostgreSQL at `localhost:5432` with default credentials 
 
 ## Architecture
 
-**Stack:** SvelteKit 2 + Svelte 5, TypeScript, Tailwind CSS 4, shadcn/ui (bits-ui), Drizzle ORM, PostgreSQL, Auth.js (GitHub OAuth), Monaco Editor, KaTeX, Railway Sandboxes for code execution.
+**Stack:** Bun (runtime + package manager), SvelteKit 2 + Svelte 5, TypeScript, Tailwind CSS 4, shadcn/ui (bits-ui), Drizzle ORM, PostgreSQL, Auth.js (GitHub OAuth), Monaco Editor, KaTeX, Railway Sandboxes for code execution.
+
+**Runtime:** Everything runs on Bun, but the app deliberately keeps the
+first-party `@sveltejs/adapter-node` rather than a Bun-specific adapter — its
+`node:http` output runs fine under Bun (`bun ./build/index.js`), so there is no
+reason to trade core-team maintenance for a community package at this traffic
+level. Revisit only if you need `Bun.serve` natively (WebSockets, throughput).
+The runner service (`runner/server.ts`) is executed directly by Bun — no
+transpile step, no Node in its image. `runner/` and `shared/` are Bun
+workspaces of the root package; the runner image installs only its own
+workspace via `bun install --filter euler-runner`.
 
 **Routing layout groups:**
 - `(app)/` — main app shell with sidebar navigation; requires auth
