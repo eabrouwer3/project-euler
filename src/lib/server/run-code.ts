@@ -1,4 +1,4 @@
-import { cargoToml, parsePackageSpec, validatePackages } from '@euler/shared';
+import { cargoToml, parsePackageSpec, validatePackages } from './validate-packages.js';
 import { runInSandbox } from './sandbox.js';
 import type { Language } from '$lib/types.js';
 

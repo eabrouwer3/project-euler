@@ -1,9 +1,0 @@
-{
-	"name": "@euler/shared",
-	"version": "1.0.0",
-	"private": true,
-	"type": "module",
-	"exports": {
-		".": "./validate-packages.ts"
-	}
-}

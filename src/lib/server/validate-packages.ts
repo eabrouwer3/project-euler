@@ -1,4 +1,6 @@
-export type Language = 'python' | 'typescript' | 'clojure' | 'rust' | 'cpp' | 'assembly';
+// Relative rather than `$lib/...` so that validate-packages.check.ts still runs standalone
+// under bun, outside SvelteKit's alias resolution.
+import type { Language } from '../types.js';
 
 /**
  * `uv pip install ${p}` is shell-interpolated (see server.ts), so this stays far more
