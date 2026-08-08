@@ -5,6 +5,15 @@ services:
       dockerfile: runner/Dockerfile
     ports:
       - "3001:3001"
+    # Solutions run in Railway Sandboxes rather than locally, so even the local runner needs
+    # API credentials — it exits immediately without them. Sandboxes it creates are billed and
+    # are scoped to RAILWAY_ENVIRONMENT_ID, so pointing this at a shared environment means
+    # local runs and deployed runs provision into the same place.
+    environment:
+      RAILWAY_API_TOKEN: ${RAILWAY_API_TOKEN:?set RAILWAY_API_TOKEN in .env}
+      RAILWAY_ENVIRONMENT_ID: ${RAILWAY_ENVIRONMENT_ID:?set RAILWAY_ENVIRONMENT_ID in .env}
+      SANDBOX_REGION: ${SANDBOX_REGION:-us-east4-eqdc4a}
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-16}
 
   postgres:
     image: postgres:16

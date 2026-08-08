@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@euler/shared": "*"
+    "@euler/shared": "*",
+    "railway": "^3.8.1"
   }
 }

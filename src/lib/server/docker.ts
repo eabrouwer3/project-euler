@@ -84,12 +84,16 @@ async function writeFiles(
 
 		case 'clojure': {
 			await writeFile(join(dir, 'main.clj'), code);
-			const deps: Record<string, unknown> = {};
-			for (const pkg of packages) {
-				const [name, version = 'RELEASE'] = pkg.split('@');
-				deps[name] = { mvn: { version } };
-			}
-			await writeFile(join(dir, 'deps.edn'), `{:deps {${Object.entries(deps).map(([k, v]) => `${k} ${JSON.stringify(v)}`).join(' ')}}}`);
+			// A coordinate is `{:mvn/version "x"}` — one namespaced keyword, not a nested map.
+			// JSON.stringify would emit `{"mvn":{"version":"x"}}`, whose quoted keys the edn
+			// reader rejects outright ("Invalid token: :").
+			const deps = packages
+				.map((pkg) => {
+					const [name, version = 'RELEASE'] = pkg.split('@');
+					return `${name} {:mvn/version ${JSON.stringify(version)}}`;
+				})
+				.join(' ');
+			await writeFile(join(dir, 'deps.edn'), `{:deps {${deps}}}`);
 			return [...commonFlags, 'clojure', 'clj', '-M', 'main.clj'];
 		}
 

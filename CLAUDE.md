@@ -32,7 +32,7 @@ Docker Compose provides PostgreSQL at `localhost:5432` with default credentials 
 
 ## Architecture
 
-**Stack:** SvelteKit 2 + Svelte 5, TypeScript, Tailwind CSS 4, shadcn/ui (bits-ui), Drizzle ORM, PostgreSQL, Auth.js (GitHub OAuth), Monaco Editor, KaTeX, Docker for code execution.
+**Stack:** SvelteKit 2 + Svelte 5, TypeScript, Tailwind CSS 4, shadcn/ui (bits-ui), Drizzle ORM, PostgreSQL, Auth.js (GitHub OAuth), Monaco Editor, KaTeX, Railway Sandboxes for code execution.
 
 **Routing layout groups:**
 - `(app)/` — main app shell with sidebar navigation; requires auth
@@ -41,10 +41,11 @@ Docker Compose provides PostgreSQL at `localhost:5432` with default credentials 
 **Core data flow:**
 1. Problem list and descriptions are fetched from `projecteuler.net/minimal=*` and cached in-memory for 1 hour
 2. User solutions are stored in PostgreSQL (one row per user + problem + language)
-3. Code execution: `POST /api/run` spawns a Docker container with resource limits (256MB RAM, 0.5 CPU, 30s timeout, no network access); supports Python, TypeScript (Bun), Clojure, Rust, C++, and x86-64 assembly (GNU as)
+3. Code execution: `POST /api/run` forwards to the runner service, which provisions a **Railway Sandbox** (a per-submission VM) from a toolchain checkpoint, runs the solution with a 30s timeout, and destroys it; supports Python, TypeScript (Bun), Clojure, Rust, C++, and x86-64 assembly (GNU as)
 
 **Key directories:**
-- `src/lib/server/` — auth, DB client, Docker runner, problem fetching
+- `src/lib/server/` — auth, DB client, runner client, problem fetching
+- `runner/` — the execution service: `sandbox.ts` owns the toolchain template and checkpoint, `server.ts` maps a language to a command
 - `src/lib/components/` — Svelte UI components (CodeEditor, ProblemDescription, RunOutput, etc.)
 - `drizzle/schema.ts` — database schema (users + solutions tables)
 - `drizzle/migrations/` — auto-generated SQL migrations (do not edit manually)
