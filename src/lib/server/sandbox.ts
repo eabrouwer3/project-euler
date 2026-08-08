@@ -50,6 +50,21 @@ const SANDBOX_ENV = {
 export const WORKDIR = '/app';
 
 /**
+ * Checked per-run rather than at boot. When this lived in a dedicated runner service, missing
+ * credentials meant that process had no purpose and exiting was right; here the same failure
+ * would take down a site whose problem browsing, editor and saved solutions all work fine
+ * without a sandbox. So running code fails loudly with a usable message and the rest serves.
+ */
+function requireCredentials(): void {
+	const missing = ['RAILWAY_API_TOKEN', 'RAILWAY_ENVIRONMENT_ID'].filter((k) => !process.env[k]);
+	if (missing.length > 0) {
+		throw new Error(
+			`Code execution is unavailable: ${missing.join(' and ')} not set on this service.`
+		);
+	}
+}
+
+/**
  * The toolchains, formerly runner/Dockerfile's job. Built once by Railway, content-addressed
  * and cached, then snapshotted into a checkpoint that every submission boots from.
  */
@@ -119,6 +134,7 @@ let checkpointPromise: Promise<string> | null = null;
  */
 export function ensureCheckpoint(): Promise<string> {
 	checkpointPromise ??= (async () => {
+		requireCredentials();
 		const template = toolchainTemplate();
 		const name = checkpointName(template);
 

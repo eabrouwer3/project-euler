@@ -1,56 +1,16 @@
-import http from 'http';
-import { cargoToml, parsePackageSpec, validatePackages, type Language } from '@euler/shared';
-import { ensureCheckpoint, runInSandbox } from './sandbox.ts';
+import { cargoToml, parsePackageSpec, validatePackages } from '@euler/shared';
+import { runInSandbox } from './sandbox.js';
+import type { Language } from '$lib/types.js';
 
-const PORT = 3001;
 const TIMEOUT_SEC = 30;
 
-for (const required of ['RAILWAY_API_TOKEN', 'RAILWAY_ENVIRONMENT_ID']) {
-	if (!process.env[required]) {
-		// Fail at boot rather than on the first submission: without these there is no sandbox to
-		// run in, and the previous design's habit of degrading quietly is what hid the missing
-		// gVisor for as long as it did.
-		console.error(`${required} is not set — the runner cannot provision sandboxes`);
-		process.exit(1);
-	}
-}
-
-const server = http.createServer(async (req, res) => {
-	if (req.method !== 'POST' || req.url !== '/run') {
-		res.writeHead(404).end();
-		return;
-	}
-
-	let body = '';
-	for await (const chunk of req) body += chunk;
-
-	const { language, code, packages } = JSON.parse(body) as {
-		language: Language;
-		code: string;
-		packages: string[];
-	};
-
-	let result: { stdout: string; stderr: string };
-	try {
-		result = await execCode(language, code, packages ?? []);
-	} catch (err) {
-		result = { stdout: '', stderr: String(err) };
-	}
-
-	res.writeHead(200, { 'Content-Type': 'application/json' });
-	res.end(JSON.stringify(result));
-});
-
 /**
- * Warming the checkpoint before listening means the first submission after a deploy pays ~2s
- * to boot a sandbox instead of ~45s to build the toolchain template. A failure here is not
- * fatal — `runInSandbox` will retry the build — so the runner still comes up.
+ * Turns a submission into the files and single command that produce its output, then runs it
+ * in a throwaway VM. There used to be a second implementation of this behind an HTTP hop —
+ * a `runner` service that had itself stopped executing anything once solutions moved into
+ * sandboxes — plus a local-Docker path here that had already drifted from it. Both are gone.
  */
-ensureCheckpoint()
-	.catch((err) => console.error(`checkpoint warm-up failed, will retry on first run: ${err}`))
-	.finally(() => server.listen(PORT, () => console.log(`Runner listening on :${PORT}`)));
-
-async function execCode(
+export async function runCode(
 	language: Language,
 	code: string,
 	packages: string[]
@@ -64,7 +24,7 @@ async function execCode(
 		case 'python': {
 			files['main.py'] = code;
 			// uv only earns its resolution step when there is something to resolve; the bare
-			// interpreter is at a fixed path precisely so the common case skips it.
+			// interpreter sits at a fixed path precisely so the common case can skip it.
 			command =
 				packages.length > 0
 					? `uv run --python 3.13 ${packages.map((p) => `--with ${p}`).join(' ')} main.py`
@@ -90,7 +50,8 @@ async function execCode(
 		case 'clojure': {
 			files['main.clj'] = code;
 			// A coordinate is `{:mvn/version "x"}` — one namespaced keyword, not a nested map.
-			// JSON.stringify would emit `{"mvn":{"version":"x"}}`, which the edn reader rejects.
+			// JSON.stringify would emit `{"mvn":{"version":"x"}}`, whose quoted keys the edn
+			// reader rejects outright ("Invalid token: :").
 			const deps = packages
 				.map((pkg) => {
 					const [name, version = 'RELEASE'] = pkg.split('@');
@@ -115,8 +76,8 @@ async function execCode(
 		}
 		case 'cpp': {
 			files['main.cpp'] = code;
-			// g++-15 rather than the base image's g++ 14: the Dockerfile targeted C++26 via a
-			// GCC 16 PPA that only exists for Ubuntu, and 15 is the closest plain Debian package.
+			// g++-15 rather than the sandbox base's g++ 14: the old Dockerfile targeted C++26 via
+			// a GCC 16 PPA that only exists for Ubuntu, and 15 is the closest plain Debian package.
 			command = 'g++-15 -O2 -std=c++26 -o main main.cpp && ./main';
 			break;
 		}

@@ -44,10 +44,9 @@ first-party `@sveltejs/adapter-node` rather than a Bun-specific adapter — its
 `node:http` output runs fine under Bun (`bun ./build/index.js`), so there is no
 reason to trade core-team maintenance for a community package at this traffic
 level. Revisit only if you need `Bun.serve` natively (WebSockets, throughput).
-The runner service (`runner/server.ts`) is executed directly by Bun — no
-transpile step, no Node in its image. `runner/` and `shared/` are Bun
-workspaces of the root package; the runner image installs only its own
-workspace via `bun install --filter euler-runner`.
+`shared/` is a Bun workspace of the root package. There is no separate runner
+service: solutions execute in Railway Sandboxes provisioned directly by the app,
+so the only deployed services are the app and Postgres.
 
 **Routing layout groups:**
 - `(app)/` — main app shell with sidebar navigation; requires auth
@@ -56,11 +55,12 @@ workspace via `bun install --filter euler-runner`.
 **Core data flow:**
 1. Problem list and descriptions are fetched from `projecteuler.net/minimal=*` and cached in-memory for 1 hour
 2. User solutions are stored in PostgreSQL (one row per user + problem + language)
-3. Code execution: `POST /api/run` forwards to the runner service, which provisions a **Railway Sandbox** (a per-submission VM) from a toolchain checkpoint, runs the solution with a 30s timeout, and destroys it; supports Python, TypeScript (Bun), Clojure, Rust, C++, and x86-64 assembly (GNU as)
+3. Code execution: `POST /api/run` provisions a **Railway Sandbox** (a per-submission VM) from a toolchain checkpoint, writes the solution into it, runs one command with a 30s timeout, and destroys it; supports Python, TypeScript (Bun), Clojure, Rust, C++, and x86-64 assembly (GNU as)
 
 **Key directories:**
-- `src/lib/server/` — auth, DB client, runner client, problem fetching
-- `runner/` — the execution service: `sandbox.ts` owns the toolchain template and checkpoint, `server.ts` maps a language to a command
+- `src/lib/server/` — auth, DB client, code execution, problem fetching
+- `src/lib/server/sandbox.ts` — the sandbox layer: toolchain template, checkpoint lifecycle, and running one command in a throwaway VM
+- `src/lib/server/run-code.ts` — maps a language and its packages to the files and command that produce the solution's output
 - `src/lib/components/` — Svelte UI components (CodeEditor, ProblemDescription, RunOutput, etc.)
 - `drizzle/schema.ts` — database schema (users + solutions tables)
 - `drizzle/migrations/` — auto-generated SQL migrations (do not edit manually)
