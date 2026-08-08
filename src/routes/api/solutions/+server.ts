@@ -4,6 +4,7 @@ import { solutions } from '../../../../drizzle/schema.js';
 import { and, eq } from 'drizzle-orm';
 import { BOILERPLATE } from '$lib/constants.js';
 import { validatePackages } from '$lib/server/validate-packages.js';
+import { warmSandbox } from '$lib/server/sandbox.js';
 import type { RequestHandler } from './$types.js';
 import type { Language, SolutionStatus } from '$lib/types.js';
 
@@ -64,6 +65,13 @@ export const POST: RequestHandler = async (event) => {
 			target: [solutions.userId, solutions.problemId, solutions.language],
 			set: { code, packages, updatedAt: new Date() }
 		});
+
+	// Autosave is already the editor's debounced "still typing" signal, so warming rides on it
+	// rather than on a heartbeat of its own. It closes the gap that warming at page load leaves:
+	// a sandbox warmed while reading the problem expires during a long think, and this boots a
+	// replacement in the background well before Run is pressed. Throttled inside warmSandbox,
+	// and never a keep-alive — it starts a sandbox, it cannot extend one.
+	warmSandbox(session.user.id);
 
 	return json({ ok: true });
 };

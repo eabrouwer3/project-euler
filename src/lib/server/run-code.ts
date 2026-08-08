@@ -1,5 +1,5 @@
 import { cargoToml, parsePackageSpec, validatePackages } from './validate-packages.js';
-import { runInSandbox } from './sandbox.js';
+import { runInSandbox, WORKDIR } from './sandbox.js';
 import type { Language } from '$lib/types.js';
 
 const TIMEOUT_SEC = 30;
@@ -12,6 +12,7 @@ const TIMEOUT_SEC = 30;
  */
 export async function runCode(
 	userId: string,
+	problemId: number,
 	language: Language,
 	code: string,
 	packages: string[]
@@ -20,6 +21,7 @@ export async function runCode(
 
 	const files: Record<string, string> = {};
 	let command: string;
+	let clojureCache = false;
 
 	switch (language) {
 		case 'python': {
@@ -50,6 +52,11 @@ export async function runCode(
 		}
 		case 'clojure': {
 			files['main.clj'] = code;
+			// A project deps.edn beats CLJ_CACHE, so the classpath cache lands in ./.cpcache — per
+			// directory, which would strand the one the template warmed in /app and make the first
+			// solve of every problem resolve the classpath again. The symlink puts it back: entries
+			// are keyed by a hash of the deps, so problems with different deps share it safely.
+			clojureCache = true;
 			// A coordinate is `{:mvn/version "x"}` — one namespaced keyword, not a nested map.
 			// JSON.stringify would emit `{"mvn":{"version":"x"}}`, whose quoted keys the edn
 			// reader rejects outright ("Invalid token: :").
@@ -89,7 +96,20 @@ export async function runCode(
 		}
 	}
 
-	const { stdout, stderr, timedOut } = await runInSandbox(userId, files, command, TIMEOUT_SEC);
+	if (clojureCache) command = `ln -sfn ${WORKDIR}/.cpcache .cpcache\n${command}`;
+
+	// One directory per problem and language: a solve never overwrites another's sources, and a
+	// user can run two problems at once. Both halves are already constrained — problemId is a
+	// number and language is one of a fixed set — so the name cannot escape its parent.
+	const directory = `p${problemId}-${language}`;
+
+	const { stdout, stderr, timedOut } = await runInSandbox(
+		userId,
+		directory,
+		files,
+		command,
+		TIMEOUT_SEC
+	);
 
 	if (timedOut) {
 		return { stdout, stderr: `Execution timed out after ${TIMEOUT_SEC} seconds\n${stderr}` };

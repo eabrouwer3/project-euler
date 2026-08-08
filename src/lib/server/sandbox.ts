@@ -38,6 +38,9 @@ const IDLE_MINUTES = 5;
  */
 const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_RUNS ?? 16);
 
+/** Where solutions are written and run; the template warms its caches here. */
+export const WORKDIR = '/app';
+
 /**
  * A sandbox command inherits *nothing* — not even PATH. Bash papers over it with a compiled-in
  * fallback, so `command -v g++` answers and the toolchain looks healthy right up until
@@ -46,16 +49,18 @@ const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_RUNS ?? 16);
  * its cache somewhere other than where the template warmed it.
  *
  * Passed per-exec rather than as `env` at create time: create-time variables measured 2.4s
- * slower per sandbox, while per-command values ride inside the command string for free.
+ * slower per sandbox, while per-command values ride inside the command string for free. That
+ * is also why no credential may ever go in here — these values are readable from `ps` by the
+ * very code the sandbox is running.
  */
 const SANDBOX_ENV = {
 	PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.cargo/bin:/root/.local/bin',
 	HOME: '/root',
-	UV_PYTHON_INSTALL_DIR: '/opt/uv/python'
+	UV_PYTHON_INSTALL_DIR: '/opt/uv/python',
+	// Shared across a user's run directories so moving between problems doesn't rebuild every
+	// dependency from scratch. Cargo locks the directory itself, so concurrent runs are safe.
+	CARGO_TARGET_DIR: `${WORKDIR}/.cache/cargo-target`
 };
-
-/** Where solutions are written and run; the template warms its caches here. */
-export const WORKDIR = '/app';
 
 /**
  * The names the SDK itself resolves a credential from, in its own precedence order: a project
@@ -322,31 +327,47 @@ function scheduleReaper(userId: string): void {
  * a failure here must not block a page that renders fine without a sandbox — the run path
  * boots one itself if this never landed or Railway has since reaped it.
  */
+const WARM_INTERVAL_MS = 30_000;
+const lastWarmed = new Map<string, number>();
+
 export function warmSandbox(userId: string): void {
+	// A live lease makes this free, but a failing one does not: lease() drops itself on rejection
+	// so every keystroke-driven call would start another doomed boot. Throttling bounds that to
+	// one attempt per interval however fast the typing is.
+	const now = Date.now();
+	if (now - (lastWarmed.get(userId) ?? 0) < WARM_INTERVAL_MS) return;
+	lastWarmed.set(userId, now);
+
 	void lease(userId)
-		.then(() => scheduleReaper(userId))
+		.then(() => {
+			// Only arm expiry if nothing is running; a run in flight arms it when it finishes.
+			if (!inFlight.has(userId)) scheduleReaper(userId);
+		})
 		.catch((err) => console.error(`sandbox warm-up failed for ${userId}: ${err}`));
 }
 
 /**
- * Serialises a user's runs. They share one /app, so two concurrent runs would overwrite each
- * other's sources between the write and the compile. Per-user rather than global: two people
- * hold different VMs and never need to wait on each other.
+ * Runs in flight per user. The reaper must not retire a VM out from under a run, and with runs
+ * no longer serialised a finished one cannot assume it was the only one — so expiry is armed
+ * when a user's last run ends, not merely when any run ends.
  */
-const chains = new Map<string, Promise<unknown>>();
+const inFlight = new Map<string, number>();
 
-function exclusive<T>(userId: string, work: () => Promise<T>): Promise<T> {
-	const previous = chains.get(userId) ?? Promise.resolve();
-	const next = previous.then(work, work);
-	// Retain only a settled marker, so one failed run cannot reject the next one's chain.
-	chains.set(
-		userId,
-		next.then(
-			() => {},
-			() => {}
-		)
-	);
-	return next;
+function runStarted(userId: string): void {
+	cancelReaper(userId);
+	inFlight.set(userId, (inFlight.get(userId) ?? 0) + 1);
+}
+
+function runFinished(userId: string): void {
+	const remaining = (inFlight.get(userId) ?? 1) - 1;
+	if (remaining > 0) {
+		inFlight.set(userId, remaining);
+		return;
+	}
+
+	inFlight.delete(userId);
+	// From the end of the run, mirroring Railway's own timer, which resets per exec.
+	if (leases.has(userId)) scheduleReaper(userId);
 }
 
 /** True for the failures that mean "this VM is gone", as opposed to the solution misbehaving. */
@@ -367,37 +388,80 @@ function sandboxIsGone(err: unknown): boolean {
  * Reuse moves it off the request path entirely; the VM then expires on its own IDLE_MINUTES
  * after the last run.
  *
- * /app is not wiped between runs. It carries the caches the template warmed there (Clojure's
- * .cpcache is cwd-relative) plus anything a previous run built, so a repeated solve reuses its
- * cargo target instead of rebuilding. Every run overwrites the files it cares about, and each
- * command compiles before it runs, so a stale artifact cannot be mistaken for fresh output.
+ * Each run gets its own directory under /app, named by the caller after the problem and
+ * language, so switching problems cannot overwrite another's sources and two of a user's runs
+ * can proceed at once. That isolation is for correctness only — a directory is no boundary
+ * between people, which is what the per-user VM is for.
+ *
+ * A run directory is not wiped between runs: whatever the last solve built there is a cache for
+ * the next one, and every command compiles before it runs, so no stale artifact can pass as
+ * fresh output.
  */
 export async function runInSandbox(
 	userId: string,
+	directory: string,
 	files: Record<string, string>,
 	command: string,
 	timeoutSec: number
 ): Promise<SandboxRun> {
 	const release = await acquire();
+	runStarted(userId);
 	try {
-		return await exclusive(userId, async () => {
-			// Held off for the duration of the run: a solution may legitimately occupy the VM for
-			// longer than the idle window, and expiring it mid-run would destroy it underneath.
-			cancelReaper(userId);
-			try {
-				return await attempt(userId, files, command, timeoutSec, true);
-			} finally {
-				// From the end of the run, mirroring Railway's own timer, which resets per exec.
-				if (leases.has(userId)) scheduleReaper(userId);
-			}
-		});
+		return await attempt(userId, directory, files, command, timeoutSec, true);
 	} finally {
+		runFinished(userId);
 		release();
 	}
 }
 
+/**
+ * Retires anything the previous run in this directory left behind before starting a new one.
+ *
+ * With a VM per submission a stray process died with the machine. Reused, a solution that
+ * double-forks outlives the exec that started it and then competes for CPU with the next run.
+ * Each run records a marker and kills the one before it, which is why the marker is written
+ * after the kill rather than before.
+ *
+ * The marker is `$$`, the shell's own pid, rather than its real process group. That is the
+ * point: if the agent gave this command its own group then `$$` is that group's id and the
+ * kill lands exactly on the previous run's tree, and if it did not, `$$` names no group at all
+ * and the kill does nothing. Reading the true pgid instead would be strictly worse — a command
+ * sharing a group with the guest agent would take the agent down with it. Best-effort by
+ * construction, and it fails towards leaving strays rather than towards breaking the sandbox.
+ */
+function reapStrays(): string {
+	return [
+		`if [ -f .euler.pgid ]; then kill -TERM -"$(cat .euler.pgid)" 2>/dev/null || true; fi`,
+		`echo $$ > .euler.pgid`
+	].join('\n');
+}
+
+/**
+ * The whole script a run sends: enter the run's directory, retire the previous run's strays,
+ * write the sources, then hand over to the language's own command.
+ *
+ * cwd stays /app because exec fails outright on a missing directory and a problem's directory
+ * may not exist yet; creating it here costs nothing over a round trip to check.
+ */
+export function buildScript(
+	directory: string,
+	files: Record<string, string>,
+	command: string
+): string {
+	return [
+		`mkdir -p ${shellQuote(directory)}`,
+		`cd ${shellQuote(directory)}`,
+		reapStrays(),
+		materialiseFiles(files),
+		command
+	]
+		.filter(Boolean)
+		.join('\n');
+}
+
 async function attempt(
 	userId: string,
+	directory: string,
 	files: Record<string, string>,
 	command: string,
 	timeoutSec: number,
@@ -408,14 +472,11 @@ async function attempt(
 	const leasedAt = performance.now();
 
 	try {
-		const prelude = materialiseFiles(files);
+		const script = buildScript(directory, files, command);
+
 		// Budget: the command's own allowance plus room for connection setup.
 		const result = await withDeadline(
-			sandbox.exec(prelude ? `${prelude}\n${command}` : command, {
-				cwd: WORKDIR,
-				timeoutSec,
-				env: SANDBOX_ENV
-			}),
+			sandbox.exec(script, { cwd: WORKDIR, timeoutSec, env: SANDBOX_ENV }),
 			(timeoutSec + 30) * 1000,
 			'sandbox run'
 		);
@@ -437,7 +498,7 @@ async function attempt(
 		if (mayRetry && sandboxIsGone(err)) {
 			console.log(`sandbox gone for ${userId}, booting a replacement: ${err}`);
 			evict(userId, sandbox);
-			return attempt(userId, files, command, timeoutSec, false);
+			return attempt(userId, directory, files, command, timeoutSec, false);
 		}
 
 		// A run that died for any other reason may have left the VM unusable; a fresh one costs
