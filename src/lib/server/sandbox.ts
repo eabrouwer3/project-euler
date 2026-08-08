@@ -1,5 +1,5 @@
-import { Sandbox } from 'railway';
-import { createHash } from 'node:crypto';
+import { Sandbox, SandboxNotFoundError, SandboxFailedError, RailwayConnectionError } from 'railway';
+import { createHash, randomBytes } from 'node:crypto';
 
 /**
  * Solutions run in a Railway Sandbox — a per-submission VM — rather than in this container.
@@ -19,16 +19,27 @@ import { createHash } from 'node:crypto';
 const REGION = process.env.SANDBOX_REGION ?? 'us-east4-eqdc4a';
 
 /**
- * Sandboxes bill while they run, idle included. Everything here is destroyed in a `finally`,
- * so this only matters when the runner dies mid-request — one minute caps that leak.
+ * A user's sandbox outlives their run so the next one skips the boot, and Railway's own idle
+ * reaper ends it — the timer resets only on `exec`, never on traffic to this app, so an open
+ * tab cannot hold a VM alive. Five minutes covers the pause between edit and re-run while
+ * capping what an abandoned session can bill to a few minutes of one VM.
+ *
+ * This is deliberately not backed by a keep-alive ping. A ping loop would defeat the reaper
+ * and turn an idle tab into an open-ended bill, which is the one failure mode worth designing
+ * against here: memory x wall-clock is essentially the whole cost of a sandbox.
  */
-const IDLE_MINUTES = 1;
+const IDLE_MINUTES = 5;
 
 /**
- * Hobby allows 50 sandboxes per environment and creation past the cap fails outright, so
- * concurrent runs are capped well under it to leave headroom for a second replica.
+ * Bounds work in flight against Railway, not VM count: with a sandbox per user, what counts
+ * against Hobby's 50-per-environment cap is how many people have been active inside the idle
+ * window, which this cannot limit. Creation past the cap fails outright, so a site busy enough
+ * to approach 50 concurrent users needs a shorter IDLE_MINUTES rather than a lower value here.
  */
 const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_RUNS ?? 16);
+
+/** Where solutions are written and run; the template warms its caches here. */
+export const WORKDIR = '/app';
 
 /**
  * A sandbox command inherits *nothing* — not even PATH. Bash papers over it with a compiled-in
@@ -38,28 +49,45 @@ const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_RUNS ?? 16);
  * its cache somewhere other than where the template warmed it.
  *
  * Passed per-exec rather than as `env` at create time: create-time variables measured 2.4s
- * slower per sandbox, while per-command values ride inside the command string for free.
+ * slower per sandbox, while per-command values ride inside the command string for free. That
+ * is also why no credential may ever go in here — these values are readable from `ps` by the
+ * very code the sandbox is running.
  */
 const SANDBOX_ENV = {
 	PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.cargo/bin:/root/.local/bin',
 	HOME: '/root',
-	UV_PYTHON_INSTALL_DIR: '/opt/uv/python'
+	UV_PYTHON_INSTALL_DIR: '/opt/uv/python',
+	// Shared across a user's run directories so moving between problems doesn't rebuild every
+	// dependency from scratch. Cargo locks the directory itself, so concurrent runs are safe.
+	CARGO_TARGET_DIR: `${WORKDIR}/.cache/cargo-target`
 };
 
-/** Where solutions are written and run; the template warms its caches here. */
-export const WORKDIR = '/app';
+/**
+ * The names the SDK itself resolves a credential from, in its own precedence order: a project
+ * token first, then an account token. Listing them here rather than checking one hard-coded
+ * name keeps this preflight from rejecting a service the SDK would have authenticated fine.
+ */
+const TOKEN_VARS = ['RAILWAY_TOKEN', 'RAILWAY_API_TOKEN'];
 
 /**
  * Checked per-run rather than at boot. When this lived in a dedicated runner service, missing
  * credentials meant that process had no purpose and exiting was right; here the same failure
  * would take down a site whose problem browsing, editor and saved solutions all work fine
  * without a sandbox. So running code fails loudly with a usable message and the rest serves.
+ *
+ * The message names the variables it wants because the failure it reports is almost always a
+ * misnamed one, and a sandbox credential is invisible from the outside: nothing else on the
+ * site degrades, so the only evidence is this string.
  */
 function requireCredentials(): void {
-	const missing = ['RAILWAY_API_TOKEN', 'RAILWAY_ENVIRONMENT_ID'].filter((k) => !process.env[k]);
+	const missing: string[] = [];
+	if (!TOKEN_VARS.some((k) => process.env[k])) missing.push(TOKEN_VARS.join(' or '));
+	// Injected into every deployed service by Railway, so this is only ever unset locally.
+	if (!process.env.RAILWAY_ENVIRONMENT_ID) missing.push('RAILWAY_ENVIRONMENT_ID');
+
 	if (missing.length > 0) {
 		throw new Error(
-			`Code execution is unavailable: ${missing.join(' and ')} not set on this service.`
+			`Code execution is unavailable: set ${missing.join(' and ')} on this service.`
 		);
 	}
 }
@@ -202,43 +230,280 @@ function withDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T>
 	return Promise.race([work, expiry]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
+function shellQuote(value: string): string {
+	return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
 /**
- * Boots a sandbox from the checkpoint, writes the solution's files, runs one command, and
- * destroys it. Restoring from a checkpoint measured ~1.7s against ~3.2s to fork a warm base,
- * and needs no base sandbox sitting there billing between submissions.
+ * Emits shell that recreates `files` on disk, so a run needs one round trip to the sandbox
+ * instead of two. `files.write` opens its own WebSocket to Railway's tcp-proxy, and setting
+ * that connection up costs far more than shipping a few KB of source — the payloads here are
+ * single solution files, so the upload itself is noise next to the handshake.
+ *
+ * The heredoc delimiter is quoted, which stops the shell expanding anything in the body, and
+ * randomised so no solution can end a heredoc early by containing the delimiter as a line.
+ */
+export function materialiseFiles(files: Record<string, string>): string {
+	const parts: string[] = [];
+
+	for (const [name, content] of Object.entries(files)) {
+		const slash = name.lastIndexOf('/');
+		if (slash !== -1) parts.push(`mkdir -p ${shellQuote(name.slice(0, slash))}`);
+
+		const delimiter = `EULER_EOF_${randomBytes(8).toString('hex')}`;
+		parts.push(`cat > ${shellQuote(name)} <<'${delimiter}'\n${content}\n${delimiter}`);
+	}
+
+	return parts.join('\n');
+}
+
+/**
+ * One live sandbox per user, keyed by their id so no two people ever share a VM. Holds the
+ * promise rather than the sandbox so concurrent callers await one boot instead of racing to
+ * create several, and so a warm-up started at page load is the very thing the first run waits
+ * on. A rejected boot is evicted so the next attempt retries instead of caching the failure.
+ */
+const leases = new Map<string, Promise<Sandbox>>();
+
+function lease(userId: string): Promise<Sandbox> {
+	let pending = leases.get(userId);
+	if (pending) return pending;
+
+	pending = (async () => {
+		const checkpoint = await ensureCheckpoint();
+		return Sandbox.create(checkpoint, { region: REGION, idleTimeoutMinutes: IDLE_MINUTES });
+	})().catch((err) => {
+		if (leases.get(userId) === pending) leases.delete(userId);
+		throw err;
+	});
+
+	leases.set(userId, pending);
+	return pending;
+}
+
+/** Drops a lease so the next run boots a fresh VM, destroying the old one if it still exists. */
+function evict(userId: string, sandbox?: Sandbox): void {
+	cancelReaper(userId);
+	leases.delete(userId);
+	void sandbox?.destroy().catch(() => {});
+}
+
+/**
+ * Releases a user's VM once it has gone unused for as long as Railway would have tolerated.
+ *
+ * Railway's reaper would take it anyway, but only this side knows it happened: without a local
+ * expiry the lease keeps pointing at a destroyed VM, and the next run discovers that by having
+ * an exec fail before it can boot a replacement. Expiring here means that run boots directly,
+ * and billing stops the moment the VM stops being useful rather than whenever it is noticed.
+ */
+const reapers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function cancelReaper(userId: string): void {
+	const timer = reapers.get(userId);
+	if (timer !== undefined) {
+		clearTimeout(timer);
+		reapers.delete(userId);
+	}
+}
+
+function scheduleReaper(userId: string): void {
+	cancelReaper(userId);
+
+	const timer = setTimeout(() => {
+		reapers.delete(userId);
+		const pending = leases.get(userId);
+		leases.delete(userId);
+		void pending?.then((sandbox) => sandbox.destroy()).catch(() => {});
+	}, IDLE_MINUTES * 60 * 1000);
+
+	// Never hold the process open just to retire a sandbox that Railway also retires.
+	(timer as { unref?: () => void }).unref?.();
+	reapers.set(userId, timer);
+}
+
+/**
+ * Starts a user's sandbox ahead of their first run, so opening a problem hides the boot behind
+ * the time they spend reading it. Deliberately fire-and-forget: warming is an optimisation, and
+ * a failure here must not block a page that renders fine without a sandbox — the run path
+ * boots one itself if this never landed or Railway has since reaped it.
+ */
+const WARM_INTERVAL_MS = 30_000;
+const lastWarmed = new Map<string, number>();
+
+export function warmSandbox(userId: string): void {
+	// A live lease makes this free, but a failing one does not: lease() drops itself on rejection
+	// so every keystroke-driven call would start another doomed boot. Throttling bounds that to
+	// one attempt per interval however fast the typing is.
+	const now = Date.now();
+	if (now - (lastWarmed.get(userId) ?? 0) < WARM_INTERVAL_MS) return;
+	lastWarmed.set(userId, now);
+
+	void lease(userId)
+		.then(() => {
+			// Only arm expiry if nothing is running; a run in flight arms it when it finishes.
+			if (!inFlight.has(userId)) scheduleReaper(userId);
+		})
+		.catch((err) => console.error(`sandbox warm-up failed for ${userId}: ${err}`));
+}
+
+/**
+ * Runs in flight per user. The reaper must not retire a VM out from under a run, and with runs
+ * no longer serialised a finished one cannot assume it was the only one — so expiry is armed
+ * when a user's last run ends, not merely when any run ends.
+ */
+const inFlight = new Map<string, number>();
+
+function runStarted(userId: string): void {
+	cancelReaper(userId);
+	inFlight.set(userId, (inFlight.get(userId) ?? 0) + 1);
+}
+
+function runFinished(userId: string): void {
+	const remaining = (inFlight.get(userId) ?? 1) - 1;
+	if (remaining > 0) {
+		inFlight.set(userId, remaining);
+		return;
+	}
+
+	inFlight.delete(userId);
+	// From the end of the run, mirroring Railway's own timer, which resets per exec.
+	if (leases.has(userId)) scheduleReaper(userId);
+}
+
+/** True for the failures that mean "this VM is gone", as opposed to the solution misbehaving. */
+function sandboxIsGone(err: unknown): boolean {
+	return (
+		err instanceof SandboxNotFoundError ||
+		err instanceof SandboxFailedError ||
+		err instanceof RailwayConnectionError
+	);
+}
+
+/**
+ * Materialises the solution's files into the user's sandbox and runs one command in it.
+ *
+ * The sandbox is reused across that user's runs rather than created per submission. Booting one
+ * measured 2.0-6.3s — Railway polls for RUNNING on a doubling schedule, so even a fast boot is
+ * quantised upward — and paying that on every submission put a hello world at 10-15s end to end.
+ * Reuse moves it off the request path entirely; the VM then expires on its own IDLE_MINUTES
+ * after the last run.
+ *
+ * Each run gets its own directory under /app, named by the caller after the problem and
+ * language, so switching problems cannot overwrite another's sources and two of a user's runs
+ * can proceed at once. That isolation is for correctness only — a directory is no boundary
+ * between people, which is what the per-user VM is for.
+ *
+ * A run directory is not wiped between runs: whatever the last solve built there is a cache for
+ * the next one, and every command compiles before it runs, so no stale artifact can pass as
+ * fresh output.
  */
 export async function runInSandbox(
+	userId: string,
+	directory: string,
 	files: Record<string, string>,
 	command: string,
 	timeoutSec: number
 ): Promise<SandboxRun> {
-	const checkpoint = await ensureCheckpoint();
 	const release = await acquire();
+	runStarted(userId);
+	try {
+		return await attempt(userId, directory, files, command, timeoutSec, true);
+	} finally {
+		runFinished(userId);
+		release();
+	}
+}
 
-	const sandbox = await Sandbox.create(checkpoint, {
-		region: REGION,
-		idleTimeoutMinutes: IDLE_MINUTES
-	});
+/**
+ * Retires anything the previous run in this directory left behind before starting a new one.
+ *
+ * With a VM per submission a stray process died with the machine. Reused, a solution that
+ * double-forks outlives the exec that started it and then competes for CPU with the next run.
+ * Each run records a marker and kills the one before it, which is why the marker is written
+ * after the kill rather than before.
+ *
+ * The marker is `$$`, the shell's own pid, rather than its real process group. That is the
+ * point: if the agent gave this command its own group then `$$` is that group's id and the
+ * kill lands exactly on the previous run's tree, and if it did not, `$$` names no group at all
+ * and the kill does nothing. Reading the true pgid instead would be strictly worse — a command
+ * sharing a group with the guest agent would take the agent down with it. Best-effort by
+ * construction, and it fails towards leaving strays rather than towards breaking the sandbox.
+ */
+function reapStrays(): string {
+	return [
+		`if [ -f .euler.pgid ]; then kill -TERM -"$(cat .euler.pgid)" 2>/dev/null || true; fi`,
+		`echo $$ > .euler.pgid`
+	].join('\n');
+}
+
+/**
+ * The whole script a run sends: enter the run's directory, retire the previous run's strays,
+ * write the sources, then hand over to the language's own command.
+ *
+ * cwd stays /app because exec fails outright on a missing directory and a problem's directory
+ * may not exist yet; creating it here costs nothing over a round trip to check.
+ */
+export function buildScript(
+	directory: string,
+	files: Record<string, string>,
+	command: string
+): string {
+	return [
+		`mkdir -p ${shellQuote(directory)}`,
+		`cd ${shellQuote(directory)}`,
+		reapStrays(),
+		materialiseFiles(files),
+		command
+	]
+		.filter(Boolean)
+		.join('\n');
+}
+
+async function attempt(
+	userId: string,
+	directory: string,
+	files: Record<string, string>,
+	command: string,
+	timeoutSec: number,
+	mayRetry: boolean
+): Promise<SandboxRun> {
+	const startedAt = performance.now();
+	const sandbox = await lease(userId);
+	const leasedAt = performance.now();
 
 	try {
-		// Budget: the command's own allowance plus room for file upload and connection setup.
+		const script = buildScript(directory, files, command);
+
+		// Budget: the command's own allowance plus room for connection setup.
 		const result = await withDeadline(
-			(async () => {
-				await Promise.all(
-					Object.entries(files).map(([name, content]) =>
-						sandbox.files.write(`${WORKDIR}/${name}`, content)
-					)
-				);
-				return sandbox.exec(command, { cwd: WORKDIR, timeoutSec, env: SANDBOX_ENV });
-			})(),
+			sandbox.exec(script, { cwd: WORKDIR, timeoutSec, env: SANDBOX_ENV }),
 			(timeoutSec + 30) * 1000,
 			'sandbox run'
 		);
+		const executedAt = performance.now();
+
+		// A warm lease should read ~0ms, so this says plainly whether reuse is working.
+		console.log(
+			`sandbox run: lease=${Math.round(leasedAt - startedAt)}ms ` +
+				`exec=${Math.round(executedAt - leasedAt)}ms ` +
+				`total=${Math.round(executedAt - startedAt)}ms`
+		);
 
 		return { stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut };
-	} finally {
-		// Never let teardown failure mask the run's own error, but do not leave a VM billing.
-		await sandbox.destroy().catch((err) => console.error(`sandbox destroy failed: ${err}`));
-		release();
+	} catch (err) {
+		// exec resolves with exitCode for a solution that fails, so a throw is the infrastructure,
+		// not the user's code — retrying re-runs nothing that already ran. Reuse makes this the
+		// expected path, not an edge case: Railway reaps an idle VM silently, so the first run
+		// after a pause inevitably meets a lease pointing at something that no longer exists.
+		if (mayRetry && sandboxIsGone(err)) {
+			console.log(`sandbox gone for ${userId}, booting a replacement: ${err}`);
+			evict(userId, sandbox);
+			return attempt(userId, directory, files, command, timeoutSec, false);
+		}
+
+		// A run that died for any other reason may have left the VM unusable; a fresh one costs
+		// a boot, while keeping a broken lease would break every later run for this user.
+		evict(userId, sandbox);
+		throw err;
 	}
 }

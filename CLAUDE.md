@@ -55,7 +55,11 @@ so the only deployed services are the app and Postgres.
 **Core data flow:**
 1. Problem list and descriptions are fetched from `projecteuler.net/minimal=*` and cached in-memory for 1 hour
 2. User solutions are stored in PostgreSQL (one row per user + problem + language)
-3. Code execution: `POST /api/run` provisions a **Railway Sandbox** (a per-submission VM) from a toolchain checkpoint, writes the solution into it, runs one command with a 30s timeout, and destroys it; supports Python, TypeScript (Bun), Clojure, Rust, C++, and x86-64 assembly (GNU as)
+3. Code execution: `POST /api/run` runs one command with a 30s timeout in a **Railway Sandbox** — a VM booted from a toolchain checkpoint, held per user and reused across their runs. Opening a problem warms one in the background; it expires ~5 minutes after the last run. Supports Python, TypeScript (Bun), Clojure, Rust, C++, and x86-64 assembly (GNU as)
+
+   Sandboxes are reused rather than created per submission because booting one costs 2-6s, which put a hello world at 10-15s end to end. Warming also rides on the editor's autosave, so a sandbox that expired during a long think is replaced before Run is pressed. An open tab cannot keep one alive — Railway's idle timer resets only on `exec`, so do not add a keep-alive ping: sandbox cost is essentially memory × wall-clock.
+
+   **The isolation boundary between users is the VM, not the filesystem.** A user has root in their own sandbox and can read all of it; it holds only the toolchain and their own solutions. Each run gets its own directory (`/app/p<problem>-<language>`) purely so runs don't overwrite each other — that is correctness, not security, and nothing may rely on it to separate people. Sandboxes have full outbound internet in both network modes (that is how dependency installs work); `ISOLATED` only keeps them off the private network, so the app and Postgres are unreachable. Never pass a credential in the sandbox env: per-exec values travel in the command string and are visible to `ps` inside the sandbox.
 
 **Key directories:**
 - `src/lib/server/` — auth, DB client, code execution, problem fetching
