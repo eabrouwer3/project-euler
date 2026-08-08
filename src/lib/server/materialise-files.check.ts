@@ -1,12 +1,13 @@
 /**
  * Solution source is spliced into a shell command so a run costs one round trip to the sandbox
  * instead of two. That makes every solution an input to a shell, so these assertions check the
- * only two things that matter: the script is valid shell, and each file arrives byte-for-byte.
+ * three things that matter: the script is valid shell, each file arrives byte-for-byte, and
+ * nothing too big to carry is carried.
  *
  * Run against real bash rather than by inspecting the string, because the property under test
  * is what a shell does with it, not what it looks like.
  */
-import { materialiseFiles, buildScript } from './sandbox.js';
+import { materialiseFiles, buildScript, splitByTransport } from './sandbox.js';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -151,5 +152,22 @@ for (let i = 0; i < 3; i++) {
 rmSync(repeat, { recursive: true, force: true });
 
 rmSync(solve.root, { recursive: true, force: true });
+
+// --- what travels in the command, and what does not ------------------------------------------
+
+// exec sends the whole script as a single WebSocket frame, and problem 22's run put the 46K name
+// list in it and failed outright. Anything file-sized must be uploaded instead, leaving no trace
+// of its contents in the script; a solution is small and still rides along with its command.
+const names = '"MARY","PATRICIA",'.repeat(4096);
+const split = splitByTransport({ 'main.py': 'print(1)', 'names.txt': names });
+
+assert(!('names.txt' in split.inline), 'a data file was left in the command');
+assert(split.upload['names.txt'] === names, 'a data file was not routed to the upload');
+assert(split.inline['main.py'] === 'print(1)', 'a solution should still ride in the command');
+assert(Object.keys(split.upload).length === 1, 'a solution should not be uploaded');
+
+const script = buildScript('p22-python', split.inline, 'python3.13 main.py');
+assert(!script.includes('"PATRICIA"'), 'uploaded contents leaked into the script');
+assert(script.length < 1024, `script should stay small, got ${script.length} bytes`);
 
 console.log('PASS: materialise-files assertions hold');

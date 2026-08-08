@@ -72,6 +72,19 @@
 		height: auto;
 		margin: 0.5rem 0;
 	}
+	/**
+	 * Project Euler's diagrams are black line art on a transparent background, so on a dark page
+	 * they are invisible rather than merely low-contrast — problem 15's grid disappeared entirely.
+	 * The site itself plates them white in its dark theme (that is what the `dark_img` class on
+	 * them means), so do the same rather than inverting: an invert would wreck the diagrams that
+	 * do carry colour.
+	 */
+	:global(.dark) .problem-content :global(img) {
+		background-color: #fff;
+		padding: 0.5rem;
+		border: 1px solid hsl(var(--border));
+		border-radius: 0.25rem;
+	}
 	.problem-content :global(blockquote) {
 		border-left: 3px solid hsl(var(--border));
 		padding-left: 1rem;

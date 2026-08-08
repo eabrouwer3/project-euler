@@ -130,8 +130,15 @@
 				language: data.language
 			})
 		});
-		if (!res.ok) throw new Error(`Server error: ${res.status}`);
-		return res.json() as Promise<{ stdout: string; stderr: string }>;
+		// The server puts why it failed in stderr; without reading it back a failed run reported
+		// nothing but its status code, which is no help at all in finding out what went wrong.
+		const result = (await res.json().catch(() => null)) as {
+			stdout: string;
+			stderr: string;
+		} | null;
+		if (!res.ok) throw new Error(result?.stderr || `Server error: ${res.status}`);
+		if (!result) throw new Error('Server returned no output');
+		return result;
 	}
 </script>
 
