@@ -235,10 +235,77 @@ export function shellQuote(value: string): string {
 }
 
 /**
+ * How much of a file may ride inside the command that runs it. `exec` sends the entire script
+ * as one JSON WebSocket frame, and Railway's own guidance is to move files with the files API
+ * and drive the sandbox with `exec` — problem 22, whose script carried the 46K name list,
+ * proved the point by failing the exec outright rather than running.
+ *
+ * A solution is a few KB, so it keeps riding along with the command it is run by, and only
+ * what is genuinely file-sized is uploaded separately.
+ */
+const MAX_INLINE_BYTES = 8 * 1024;
+
+/**
+ * Splits what a run needs on disk by how it gets there: small files into the command, anything
+ * larger into its own upload.
+ */
+export function splitByTransport(files: Record<string, string>): {
+	inline: Record<string, string>;
+	upload: Record<string, string>;
+} {
+	const inline: Record<string, string> = {};
+	const upload: Record<string, string> = {};
+
+	for (const [name, content] of Object.entries(files)) {
+		if (Buffer.byteLength(content) > MAX_INLINE_BYTES) upload[name] = content;
+		else inline[name] = content;
+	}
+
+	return { inline, upload };
+}
+
+/**
+ * What each sandbox already holds, by path and content, so a data file is uploaded once per VM
+ * rather than once per run — problem 22's list does not change between attempts at it. Keyed by
+ * the sandbox itself: a replaced VM is a different object and starts from nothing, which is
+ * exactly right, since the replacement's disk really is empty.
+ */
+const uploaded = new WeakMap<Sandbox, Map<string, string>>();
+
+/**
+ * Puts `files` on the sandbox through the files API, which creates missing parents and retries
+ * a dropped connection on its own. Recorded only once written, so a failed upload is retried by
+ * the next run rather than assumed to have landed.
+ */
+async function uploadFiles(
+	sandbox: Sandbox,
+	directory: string,
+	files: Record<string, string>
+): Promise<void> {
+	const entries = Object.entries(files);
+	if (entries.length === 0) return;
+
+	let present = uploaded.get(sandbox);
+	if (!present) {
+		present = new Map<string, string>();
+		uploaded.set(sandbox, present);
+	}
+
+	for (const [name, content] of entries) {
+		const path = `${WORKDIR}/${directory}/${name}`;
+		const digest = createHash('sha256').update(content).digest('hex');
+		if (present.get(path) === digest) continue;
+
+		await sandbox.files.write(path, content);
+		present.set(path, digest);
+	}
+}
+
+/**
  * Emits shell that recreates `files` on disk, so a run needs one round trip to the sandbox
  * instead of two. `files.write` opens its own WebSocket to Railway's tcp-proxy, and setting
- * that connection up costs far more than shipping a few KB of source — the payloads here are
- * single solution files, so the upload itself is noise next to the handshake.
+ * that connection up costs far more than shipping a few KB of source — which is why only the
+ * files too big to carry (see `MAX_INLINE_BYTES`) pay for it.
  *
  * The heredoc delimiter is quoted, which stops the shell expanding anything in the body, and
  * randomised so no solution can end a heredoc early by containing the delimiter as a line.
@@ -391,7 +458,8 @@ function sandboxIsGone(err: unknown): boolean {
 }
 
 /**
- * Materialises the solution's files into the user's sandbox and runs one command in it.
+ * Materialises the solution's files into the user's sandbox and runs one command in it. Small
+ * files travel in the command; a problem's data file is uploaded and left there for later runs.
  *
  * The sandbox is reused across that user's runs rather than created per submission. Booting one
  * measured 2.0-6.3s — Railway polls for RUNNING on a doubling schedule, so even a fast boot is
@@ -483,7 +551,14 @@ async function attempt(
 	const leasedAt = performance.now();
 
 	try {
-		const script = buildScript(directory, files, command);
+		const { inline, upload } = splitByTransport(files);
+
+		// Inside the try so an upload that discovers a dead VM retries on a fresh one, exactly as
+		// an exec does. Bounded generously: this is a file transfer, not the solution running.
+		await withDeadline(uploadFiles(sandbox, directory, upload), 60_000, 'sandbox file upload');
+		const uploadedAt = performance.now();
+
+		const script = buildScript(directory, inline, command);
 
 		// Budget: the command's own allowance plus room for connection setup.
 		const result = await withDeadline(
@@ -493,10 +568,12 @@ async function attempt(
 		);
 		const executedAt = performance.now();
 
-		// A warm lease should read ~0ms, so this says plainly whether reuse is working.
+		// A warm lease should read ~0ms, and upload only the first run that needs a data file, so
+		// this says plainly whether reuse is working on both.
 		console.log(
 			`sandbox run: lease=${Math.round(leasedAt - startedAt)}ms ` +
-				`exec=${Math.round(executedAt - leasedAt)}ms ` +
+				`upload=${Math.round(uploadedAt - leasedAt)}ms ` +
+				`exec=${Math.round(executedAt - uploadedAt)}ms ` +
 				`total=${Math.round(executedAt - startedAt)}ms`
 		);
 
