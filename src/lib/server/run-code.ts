@@ -1,8 +1,42 @@
 import { cargoToml, parsePackageSpec, validatePackages } from './validate-packages.js';
-import { runInSandbox, WORKDIR } from './sandbox.js';
+import { runInSandbox, shellQuote, WORKDIR } from './sandbox.js';
+import { loadProblemAttachments } from './problems.js';
 import type { Language } from '$lib/types.js';
 
 const TIMEOUT_SEC = 30;
+
+/**
+ * The data files a problem hands out, ready to be written next to the solution.
+ *
+ * Never fatal: a solution that does not read the file runs fine without it, and one that does
+ * gets a named warning on stderr instead of the language's own "no such file", which says
+ * nothing about why it is missing.
+ */
+async function problemFiles(problemId: number): Promise<{
+	files: Record<string, string>;
+	links: string[];
+	warning: string;
+}> {
+	const { attachments, missing } = await loadProblemAttachments(problemId).catch((err) => {
+		console.error(`problem ${problemId} attachments unavailable: ${err}`);
+		return { attachments: [], missing: ['(projecteuler.net could not be reached)'] };
+	});
+
+	const files: Record<string, string> = {};
+	const links: string[] = [];
+
+	for (const { name, aliases, content } of attachments) {
+		files[name] = content;
+		// Symlinks rather than copies: the alternate spellings exist so a solution that guessed
+		// the other name still opens the file, not so there are two files to keep in step.
+		for (const alias of aliases) links.push(`ln -sfn ${shellQuote(name)} ${shellQuote(alias)}`);
+	}
+
+	const warning =
+		missing.length > 0 ? `Warning: could not fetch problem data ${missing.join(', ')}\n` : '';
+
+	return { files, links, warning };
+}
 
 /**
  * Turns a submission into the files and single command that produce its output, then runs it
@@ -18,6 +52,9 @@ export async function runCode(
 	packages: string[]
 ): Promise<{ stdout: string; stderr: string }> {
 	validatePackages(language, packages);
+
+	// Fetched alongside the rest of the setup; the page's warm-up has usually cached it already.
+	const problemData = problemFiles(problemId);
 
 	const files: Record<string, string> = {};
 	let command: string;
@@ -98,6 +135,19 @@ export async function runCode(
 
 	if (clojureCache) command = `ln -sfn ${WORKDIR}/.cpcache .cpcache\n${command}`;
 
+	// Sources are written exactly as given, and the editor does not necessarily leave a trailing
+	// newline. Compilers have long since stopped minding, but nothing is gained by finding out
+	// which of six toolchains still does.
+	for (const [name, content] of Object.entries(files)) {
+		if (!content.endsWith('\n')) files[name] = `${content}\n`;
+	}
+
+	// The problem's own data lands in the working directory, so `open('names.txt')` just works.
+	// Written before the solution's files so a solution can never be shadowed by one of them.
+	const { files: dataFiles, links, warning } = await problemData;
+	const allFiles = { ...dataFiles, ...files };
+	if (links.length > 0) command = `${links.join('\n')}\n${command}`;
+
 	// One directory per problem and language: a solve never overwrites another's sources, and a
 	// user can run two problems at once. Both halves are already constrained — problemId is a
 	// number and language is one of a fixed set — so the name cannot escape its parent.
@@ -106,13 +156,16 @@ export async function runCode(
 	const { stdout, stderr, timedOut } = await runInSandbox(
 		userId,
 		directory,
-		files,
+		allFiles,
 		command,
 		TIMEOUT_SEC
 	);
 
 	if (timedOut) {
-		return { stdout, stderr: `Execution timed out after ${TIMEOUT_SEC} seconds\n${stderr}` };
+		return {
+			stdout,
+			stderr: `${warning}Execution timed out after ${TIMEOUT_SEC} seconds\n${stderr}`
+		};
 	}
-	return { stdout, stderr };
+	return { stdout, stderr: `${warning}${stderr}` };
 }

@@ -3,7 +3,13 @@
 	import 'katex/dist/katex.min.css';
 	import { X } from '@lucide/svelte';
 
-	let { html, onclose }: { html: string; onclose?: () => void } = $props();
+	import type { ProblemAttachment } from '$lib/types.js';
+
+	let {
+		html,
+		attachments = [],
+		onclose
+	}: { html: string; attachments?: ProblemAttachment[]; onclose?: () => void } = $props();
 
 	let container: HTMLDivElement | undefined = $state();
 
@@ -41,6 +47,26 @@
 			{@html html}
 		</div>
 	</div>
+	{#if attachments.length > 0}
+		<!-- The runner writes these next to the solution; say so, or nobody would think to open them. -->
+		<div class="shrink-0 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+			<span>Already in your working directory when you run:</span>
+			<ul class="mt-1 space-y-0.5">
+				{#each attachments as attachment (attachment.url)}
+					<li>
+						<code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">
+							{attachment.name}
+						</code>
+						{#if attachment.aliases.length > 0}
+							<span class="text-muted-foreground">
+								(also {attachment.aliases.join(', ')})
+							</span>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</div>
+	{/if}
 </aside>
 
 <style>

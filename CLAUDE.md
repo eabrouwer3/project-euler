@@ -53,9 +53,10 @@ so the only deployed services are the app and Postgres.
 - `(auth)/` — login page
 
 **Core data flow:**
-1. Problem list and descriptions are fetched from `projecteuler.net/minimal=*` and cached in-memory for 1 hour
-2. User solutions are stored in PostgreSQL (one row per user + problem + language)
-3. Code execution: `POST /api/run` runs one command with a 30s timeout in a **Railway Sandbox** — a VM booted from a toolchain checkpoint, held per user and reused across their runs. Opening a problem warms one in the background; it expires ~5 minutes after the last run. Supports Python, TypeScript (Bun), Clojure, Rust, C++, and x86-64 assembly (GNU as)
+1. Problem list and descriptions are fetched from `projecteuler.net/minimal=*` and cached in-memory (the list for 1 hour, a description for the life of the process). Descriptions link images, data files and other problems relative to projecteuler.net's document root, so `resolveLinks` absolutises them — without it every problem image renders broken
+2. Problems that hand out a data file (`names.txt` for 22, `triangle.txt` for 67) get it written into the run's working directory, so a solution can just open it by name. The file lands under the name the problem's own text uses, with the other spelling symlinked, and byte-for-byte — `materialiseFiles` adds no trailing newline, because problem 22's file ends without one
+3. User solutions are stored in PostgreSQL (one row per user + problem + language)
+4. Code execution: `POST /api/run` runs one command with a 30s timeout in a **Railway Sandbox** — a VM booted from a toolchain checkpoint, held per user and reused across their runs. Opening a problem warms one in the background; it expires ~5 minutes after the last run. Supports Python, TypeScript (Bun), Clojure, Rust, C++, and x86-64 assembly (GNU as)
 
    Sandboxes are reused rather than created per submission because booting one costs 2-6s, which put a hello world at 10-15s end to end. Warming also rides on the editor's autosave, so a sandbox that expired during a long think is replaced before Run is pressed. An open tab cannot keep one alive — Railway's idle timer resets only on `exec`, so do not add a keep-alive ping: sandbox cost is essentially memory × wall-clock.
 
