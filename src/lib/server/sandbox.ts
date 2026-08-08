@@ -1,5 +1,5 @@
 import { Sandbox } from 'railway';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 /**
  * Solutions run in a Railway Sandbox — a per-submission VM — rather than in this container.
@@ -217,10 +217,37 @@ function withDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T>
 	return Promise.race([work, expiry]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
+function shellQuote(value: string): string {
+	return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
 /**
- * Boots a sandbox from the checkpoint, writes the solution's files, runs one command, and
- * destroys it. Restoring from a checkpoint measured ~1.7s against ~3.2s to fork a warm base,
- * and needs no base sandbox sitting there billing between submissions.
+ * Emits shell that recreates `files` on disk, so a run needs one round trip to the sandbox
+ * instead of two. `files.write` opens its own WebSocket to Railway's tcp-proxy, and setting
+ * that connection up costs far more than shipping a few KB of source — the payloads here are
+ * single solution files, so the upload itself is noise next to the handshake.
+ *
+ * The heredoc delimiter is quoted, which stops the shell expanding anything in the body, and
+ * randomised so no solution can end a heredoc early by containing the delimiter as a line.
+ */
+export function materialiseFiles(files: Record<string, string>): string {
+	const parts: string[] = [];
+
+	for (const [name, content] of Object.entries(files)) {
+		const slash = name.lastIndexOf('/');
+		if (slash !== -1) parts.push(`mkdir -p ${shellQuote(name.slice(0, slash))}`);
+
+		const delimiter = `EULER_EOF_${randomBytes(8).toString('hex')}`;
+		parts.push(`cat > ${shellQuote(name)} <<'${delimiter}'\n${content}\n${delimiter}`);
+	}
+
+	return parts.join('\n');
+}
+
+/**
+ * Boots a sandbox from the checkpoint, materialises the solution's files, runs one command,
+ * and destroys it. Restoring from a checkpoint measured ~1.7s against ~3.2s to fork a warm
+ * base, and needs no base sandbox sitting there billing between submissions.
  */
 export async function runInSandbox(
 	files: Record<string, string>,
@@ -230,24 +257,34 @@ export async function runInSandbox(
 	const checkpoint = await ensureCheckpoint();
 	const release = await acquire();
 
+	const startedAt = performance.now();
 	const sandbox = await Sandbox.create(checkpoint, {
 		region: REGION,
 		idleTimeoutMinutes: IDLE_MINUTES
 	});
+	const createdAt = performance.now();
 
 	try {
-		// Budget: the command's own allowance plus room for file upload and connection setup.
+		const prelude = materialiseFiles(files);
+		// Budget: the command's own allowance plus room for connection setup.
 		const result = await withDeadline(
-			(async () => {
-				await Promise.all(
-					Object.entries(files).map(([name, content]) =>
-						sandbox.files.write(`${WORKDIR}/${name}`, content)
-					)
-				);
-				return sandbox.exec(command, { cwd: WORKDIR, timeoutSec, env: SANDBOX_ENV });
-			})(),
+			sandbox.exec(prelude ? `${prelude}\n${command}` : command, {
+				cwd: WORKDIR,
+				timeoutSec,
+				env: SANDBOX_ENV
+			}),
 			(timeoutSec + 30) * 1000,
 			'sandbox run'
+		);
+		const executedAt = performance.now();
+
+		// Boot dominates a short run and varies by seconds between identical submissions, so the
+		// split is worth keeping: a slow run is either Railway provisioning or the solution, and
+		// the totals alone cannot tell those apart.
+		console.log(
+			`sandbox run: create=${Math.round(createdAt - startedAt)}ms ` +
+				`exec=${Math.round(executedAt - createdAt)}ms ` +
+				`total=${Math.round(executedAt - startedAt)}ms`
 		);
 
 		return { stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut };
