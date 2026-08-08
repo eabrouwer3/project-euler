@@ -2,21 +2,17 @@
   "name": "project-euler-web",
   "version": "0.1.0",
   "private": true,
-  "workspaces": [
-    "shared",
-    "runner"
-  ],
   "scripts": {
     "start": "bun ./build/index.js",
     "dev": "bunx --bun vite dev",
     "build": "bunx --bun vite build",
     "preview": "bunx --bun vite preview",
     "db:generate": "bunx --bun drizzle-kit generate",
-    "db:migrate": "bunx --bun drizzle-kit migrate"
+    "db:migrate": "bunx --bun drizzle-kit migrate",
+    "test": "bun src/lib/server/validate-packages.check.ts"
   },
   "dependencies": {
     "@auth/sveltekit": "^1.7.4",
-    "@euler/shared": "*",
     "@monaco-editor/loader": "^1.4.0",
     "@tailwindcss/vite": "^4.2.2",
     "clsx": "^2.1.1",
@@ -25,6 +21,7 @@
     "katex": "^0.16.45",
     "mode-watcher": "^1.1.0",
     "postgres": "^3.4.5",
+    "railway": "^3.8.1",
     "tailwind-merge": "^3.5.0",
     "tailwind-variants": "^3.2.2",
     "tailwindcss": "^4.2.2",

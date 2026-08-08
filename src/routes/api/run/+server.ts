@@ -2,7 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import { db } from '$lib/server/db.js';
 import { solutions } from '../../../../drizzle/schema.js';
 import { and, eq } from 'drizzle-orm';
-import { runCode } from '$lib/server/docker.js';
+import { runCode } from '$lib/server/run-code.js';
 import { BOILERPLATE } from '$lib/constants.js';
 import type { RequestHandler } from './$types.js';
 import type { Language } from '$lib/types.js';
