@@ -7,6 +7,7 @@
 	import PackageInput from '$lib/components/PackageInput.svelte';
 	import ProblemDescription from '$lib/components/ProblemDescription.svelte';
 	import RunOutput from '$lib/components/RunOutput.svelte';
+	import WorkingDirectory from '$lib/components/WorkingDirectory.svelte';
 	import { SUPPORTS_PACKAGES } from '$lib/constants.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { BookOpen } from '@lucide/svelte';
@@ -195,6 +196,11 @@
 			{#if SUPPORTS_PACKAGES[data.language]}
 				<PackageInput bind:packages onchange={(pkgs) => scheduleAutosave(code, pkgs)} />
 			{/if}
+			<WorkingDirectory
+				language={data.language}
+				{packages}
+				attachments={data.attachments}
+			/>
 			<RunOutput onrun={runSolution} disabled={saveStatus === 'saving'} />
 		</div>
 	</div>
@@ -224,10 +230,6 @@
 			md:static md:z-auto md:w-[var(--problem-width)] md:max-w-none md:translate-x-0 md:transition-none
 			{problemOpen ? 'translate-x-0' : 'translate-x-full'}"
 	>
-		<ProblemDescription
-			html={data.problemHtml}
-			attachments={data.attachments}
-			onclose={() => (problemOpen = false)}
-		/>
+		<ProblemDescription html={data.problemHtml} onclose={() => (problemOpen = false)} />
 	</div>
 </div>
