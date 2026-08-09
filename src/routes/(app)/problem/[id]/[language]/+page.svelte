@@ -9,6 +9,7 @@
 	import RunOutput from '$lib/components/RunOutput.svelte';
 	import WorkingDirectory from '$lib/components/WorkingDirectory.svelte';
 	import { SUPPORTS_PACKAGES } from '$lib/constants.js';
+	import { compact } from '$lib/compact.svelte.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { BookOpen } from '@lucide/svelte';
 	import type { Language, SolutionStatus } from '$lib/types.js';
@@ -31,6 +32,12 @@
 
 	// Off-canvas problem description, only meaningful below the `md` breakpoint
 	let problemOpen = $state(false);
+
+	// On a phone the keyboard already costs about half the screen, so an editor that also gives 40%
+	// of what is left to the output panel is a four-line editor. While it has focus, the panel folds
+	// down to its Run button and hands the space back.
+	let editorFocused = $state(false);
+	const editing = $derived(compact.current && editorFocused);
 
 	$effect(() => { localStorage.setItem('problem-width', String(problemWidth)); });
 	$effect(() => { localStorage.setItem('output-height', String(outputHeight)); });
@@ -184,15 +191,21 @@
 			</Button>
 		</div>
 
-		<!-- Monaco editor -->
-		<div class="flex-1 overflow-hidden">
-			<CodeEditor bind:code language={data.language} onchange={(val) => scheduleAutosave(val)} />
+		<!-- Code editor -->
+		<div class="min-h-0 flex-1 overflow-hidden">
+			<CodeEditor
+				bind:code
+				language={data.language}
+				onchange={(val) => scheduleAutosave(val)}
+				onfocuschange={(f) => (editorFocused = f)}
+			/>
 		</div>
 
 		<!-- Bottom panels: stacked under the editor at every size -->
 		<div
 			style="--output-height: {outputHeight}px"
-			class="flex h-2/5 shrink-0 flex-col border-t border-border md:h-[var(--output-height)]"
+			class="flex shrink-0 flex-col border-t border-border md:h-[var(--output-height)]
+				{editing ? 'h-auto' : 'h-2/5'}"
 		>
 			<div
 				class="hidden h-1 shrink-0 cursor-row-resize transition-colors hover:bg-primary/30 md:block"
@@ -200,15 +213,22 @@
 				role="separator"
 				aria-label="Resize output panel"
 			></div>
-			{#if SUPPORTS_PACKAGES[data.language]}
-				<PackageInput bind:packages onchange={(pkgs) => scheduleAutosave(code, pkgs)} />
-			{/if}
-			<WorkingDirectory
-				language={data.language}
-				{packages}
-				attachments={data.attachments}
-			/>
-			<RunOutput onrun={runSolution} disabled={saveStatus === 'saving'} />
+			<!--
+				Hidden rather than unmounted while editing, so the package field keeps what is in it.
+				Inline `display` because `contents` and `hidden` are the same Tailwind property and
+				which one won would come down to stylesheet order.
+			-->
+			<div style={editing ? 'display:none' : 'display:contents'}>
+				{#if SUPPORTS_PACKAGES[data.language]}
+					<PackageInput bind:packages onchange={(pkgs) => scheduleAutosave(code, pkgs)} />
+				{/if}
+				<WorkingDirectory
+					language={data.language}
+					{packages}
+					attachments={data.attachments}
+				/>
+			</div>
+			<RunOutput onrun={runSolution} disabled={saveStatus === 'saving'} collapsed={editing} />
 		</div>
 	</div>
 

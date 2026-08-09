@@ -3,10 +3,17 @@
 
 	let {
 		onrun,
-		disabled = false
+		disabled = false,
+		collapsed = false
 	}: {
 		onrun: () => Promise<{ stdout: string; stderr: string }>;
 		disabled?: boolean;
+		/**
+		 * Drop everything but the header, so the panel shrinks to the Run button alone. Used on a
+		 * phone while the editor has focus, where the keyboard has already taken half the screen and
+		 * output you are not reading is not worth the rest of it.
+		 */
+		collapsed?: boolean;
 	} = $props();
 
 	let running = $state(false);
@@ -49,7 +56,9 @@
 		</Button>
 	</div>
 
-	{#if hasOutput}
+	{#if collapsed}
+		<!-- header only -->
+	{:else if hasOutput}
 		<div class="flex-1 overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs">
 			{#if stdout}
 				<pre class="whitespace-pre-wrap text-green-400">{stdout}</pre>
