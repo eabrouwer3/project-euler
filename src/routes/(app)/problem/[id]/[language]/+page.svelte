@@ -9,9 +9,10 @@
 	import RunOutput from '$lib/components/RunOutput.svelte';
 	import WorkingDirectory from '$lib/components/WorkingDirectory.svelte';
 	import { SUPPORTS_PACKAGES } from '$lib/constants.js';
+	import { streamRun } from '$lib/run-stream.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { BookOpen } from '@lucide/svelte';
-	import type { Language, SolutionStatus } from '$lib/types.js';
+	import type { Language, RunEvent, SolutionStatus } from '$lib/types.js';
 	import type { PageData } from './$types.js';
 
 	// Green treatment layered over the outline variant, which otherwise wins on hover/dark
@@ -121,24 +122,8 @@
 		invalidate('app:solutions');
 	}
 
-	async function runSolution() {
-		const res = await fetch('/api/run', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				problemId: data.problemId,
-				language: data.language
-			})
-		});
-		// The server puts why it failed in stderr; without reading it back a failed run reported
-		// nothing but its status code, which is no help at all in finding out what went wrong.
-		const result = (await res.json().catch(() => null)) as {
-			stdout: string;
-			stderr: string;
-		} | null;
-		if (!res.ok) throw new Error(result?.stderr || `Server error: ${res.status}`);
-		if (!result) throw new Error('Server returned no output');
-		return result;
+	function runSolution(emit: (event: RunEvent) => void) {
+		return streamRun({ problemId: data.problemId, language: data.language }, emit);
 	}
 </script>
 
