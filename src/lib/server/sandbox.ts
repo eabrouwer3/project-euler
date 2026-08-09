@@ -217,6 +217,20 @@ async function acquire(): Promise<() => void> {
 
 export type SandboxRun = { stdout: string; stderr: string; timedOut: boolean };
 
+/**
+ * Watches a run as it happens, for a caller streaming it somewhere. The exec returns the whole
+ * of both streams anyway; this is only about when the reader sees them, which for a solve that
+ * takes most of its minute is the difference between watching it work and staring at a spinner.
+ *
+ * `restarted` says that everything reported so far came from a sandbox that turned out to be
+ * gone, and the run is starting over on a replacement — whoever is showing that output needs to
+ * throw it away rather than let a dead VM's half a run stand above a live one's.
+ */
+export type RunWatcher = {
+	chunk?: (stream: 'stdout' | 'stderr', text: string) => void;
+	restarted?: () => void;
+};
+
 /** How long the deadline waits between its SIGTERM and the SIGKILL that follows. */
 const KILL_GRACE_SEC = 5;
 
@@ -499,15 +513,30 @@ export async function runInSandbox(
 	directory: string,
 	files: Record<string, string>,
 	command: string,
-	timeoutSec: number
+	timeoutSec: number,
+	watcher: RunWatcher = {}
 ): Promise<SandboxRun> {
 	const release = await acquire();
 	runStarted(userId);
 	try {
-		return await attempt(userId, directory, files, command, timeoutSec, true);
+		return await attempt(userId, directory, files, command, timeoutSec, true, watcher);
 	} finally {
 		runFinished(userId);
 		release();
+	}
+}
+
+/**
+ * Hands a watcher what just happened without letting it interfere. The SDK rejects the exec if a
+ * chunk handler throws, and the likeliest thing on the other end of one is a response stream to
+ * a reader who has closed the tab — that is not a reason to tear down a run, still less to treat
+ * a live sandbox as broken and evict it, which is what a throw from here would look like.
+ */
+function notify(work: () => void): void {
+	try {
+		work();
+	} catch (err) {
+		console.error(`run watcher failed: ${err}`);
 	}
 }
 
@@ -584,7 +613,8 @@ async function attempt(
 	files: Record<string, string>,
 	command: string,
 	timeoutSec: number,
-	mayRetry: boolean
+	mayRetry: boolean,
+	watcher: RunWatcher
 ): Promise<SandboxRun> {
 	const startedAt = performance.now();
 	const sandbox = await lease(userId);
@@ -606,7 +636,16 @@ async function attempt(
 		// Railway's proxy allows a request that has sent nothing.
 		const backstopSec = timeoutSec + BACKSTOP_MARGIN_SEC;
 		const result = await withDeadline(
-			sandbox.exec(script, { cwd: WORKDIR, timeoutSec: backstopSec, env: SANDBOX_ENV }),
+			sandbox.exec(script, {
+				cwd: WORKDIR,
+				timeoutSec: backstopSec,
+				env: SANDBOX_ENV,
+				// The same chunks the SDK is accumulating into the result below, handed on as they
+				// land rather than waited for. A solution that prints its way through a minute is
+				// read while it runs, and one that overruns has already shown its work.
+				onStdout: (text) => notify(() => watcher.chunk?.('stdout', text)),
+				onStderr: (text) => notify(() => watcher.chunk?.('stderr', text))
+			}),
 			(backstopSec + 30) * 1000,
 			'sandbox run'
 		);
@@ -636,7 +675,10 @@ async function attempt(
 		if (mayRetry && sandboxIsGone(err)) {
 			console.log(`sandbox gone for ${userId}, booting a replacement: ${err}`);
 			evict(userId, sandbox);
-			return attempt(userId, directory, files, command, timeoutSec, false);
+			// Anything already streamed came out of the VM that has just been declared missing, so
+			// it is retracted before the replacement starts printing over the top of it.
+			notify(() => watcher.restarted?.());
+			return attempt(userId, directory, files, command, timeoutSec, false, watcher);
 		}
 
 		// A run that died for any other reason may have left the VM unusable; a fresh one costs

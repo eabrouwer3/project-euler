@@ -60,6 +60,8 @@ so the only deployed services are the app and Postgres.
 
    The deadline is enforced by `timeout` inside the sandbox, not by `exec`'s own `timeoutSec`, which the SDK implements by closing the WebSocket and so drops whatever the agent had not yet sent — a run that overruns still returns everything it printed, which is the only thing there is to debug it with. exec's timeout stays armed a little later as a backstop. That output only survives the kill if it left the process, so the sandbox env sets `PYTHONUNBUFFERED` and C++ runs under `stdbuf`; Rust, the JVM and Bun already write out as they go
 
+   The endpoint **streams**, in newline-delimited JSON (`RunEvent` in `src/lib/types.ts`), because a minute-long deadline means up to a minute of watching a spinner otherwise. `exec`'s chunk callbacks feed a `RunWatcher`, `run-code.ts` turns those into events, and `src/lib/run-stream.ts` reads them back on the client. Consequences: status codes only mean anything before the first event — a run that fails after that reports an `error` event under a 200; a chunk handler must never throw, since the SDK rejects the exec if one does and a reader closing the tab would otherwise look like a broken sandbox; and a retry onto a fresh VM emits `reset`, because the output so far came from a VM that no longer exists. `RunOutput.svelte` applies chunks one animation frame at a time rather than one line at a time, and keeps the panel pinned to the newest output unless the reader has scrolled away from the bottom
+
    Sandboxes are reused rather than created per submission because booting one costs 2-6s, which put a hello world at 10-15s end to end. Warming also rides on the editor's autosave, so a sandbox that expired during a long think is replaced before Run is pressed. An open tab cannot keep one alive — Railway's idle timer resets only on `exec`, so do not add a keep-alive ping: sandbox cost is essentially memory × wall-clock.
 
    **The isolation boundary between users is the VM, not the filesystem.** A user has root in their own sandbox and can read all of it; it holds only the toolchain and their own solutions. Each run gets its own directory (`/app/p<problem>-<language>`) purely so runs don't overwrite each other — that is correctness, not security, and nothing may rely on it to separate people. Sandboxes have full outbound internet in both network modes (that is how dependency installs work); `ISOLATED` only keeps them off the private network, so the app and Postgres are unreachable. Never pass a credential in the sandbox env: per-exec values travel in the command string and are visible to `ps` inside the sandbox.
@@ -94,6 +96,7 @@ Safari does not yet honour.
   per-language grammar and indent width
 - `src/lib/server/sandbox.ts` — the sandbox layer: toolchain template, checkpoint lifecycle, and running one command in a throwaway VM
 - `src/lib/server/run-code.ts` — maps a language and its packages to the files and command that produce the solution's output
+- `src/lib/run-stream.ts` — the client half of the run stream: reads the newline-delimited events back out of `POST /api/run`
 - `src/lib/components/` — Svelte UI components (CodeEditor, ProblemDescription, RunOutput, etc.)
 - `drizzle/schema.ts` — database schema (users + solutions tables)
 - `drizzle/migrations/` — auto-generated SQL migrations (do not edit manually)

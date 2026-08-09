@@ -2,7 +2,7 @@ import { cargoToml, parsePackageSpec, validatePackages } from './validate-packag
 import { runInSandbox, shellQuote, WORKDIR } from './sandbox.js';
 import { loadProblemAttachments } from './problems.js';
 import { solutionFiles } from '$lib/constants.js';
-import type { Language } from '$lib/types.js';
+import type { Language, RunEvent } from '$lib/types.js';
 
 /**
  * Project Euler's own guidance is the one-minute rule: a problem is meant to have a solution
@@ -48,17 +48,24 @@ async function problemFiles(problemId: number): Promise<{
 
 /**
  * Turns a submission into the files and single command that produce its output, then runs it
- * in a throwaway VM. There used to be a second implementation of this behind an HTTP hop —
+ * in the user's sandbox. There used to be a second implementation of this behind an HTTP hop —
  * a `runner` service that had itself stopped executing anything once solutions moved into
  * sandboxes — plus a local-Docker path here that had already drifted from it. Both are gone.
+ *
+ * Reports through `emit` rather than returning what the run printed: the deadline gives a solve
+ * a whole minute, and a minute of accumulating output to hand over at the end is a minute of
+ * watching a spinner. Everything a reader sees comes through here in the order it happened —
+ * the warning about a data file that could not be fetched, the run's own two streams, and last
+ * the deadline, if that is what stopped it.
  */
 export async function runCode(
 	userId: string,
 	problemId: number,
 	language: Language,
 	code: string,
-	packages: string[]
-): Promise<{ stdout: string; stderr: string }> {
+	packages: string[],
+	emit: (event: RunEvent) => void
+): Promise<void> {
 	validatePackages(language, packages);
 
 	// Fetched alongside the rest of the setup; the page's warm-up has usually cached it already.
@@ -176,23 +183,31 @@ export async function runCode(
 	// number and language is one of a fixed set — so the name cannot escape its parent.
 	const directory = `p${problemId}-${language}`;
 
-	const { stdout, stderr, timedOut } = await runInSandbox(
-		userId,
-		directory,
-		allFiles,
-		command,
-		TIMEOUT_SEC
-	);
+	if (warning) emit({ type: 'stderr', text: warning });
+
+	// Whether the last thing written to stderr left the line open, so the deadline's own line
+	// below starts on one of its own instead of running on from a half-finished traceback.
+	let stderrAtLineStart = true;
+
+	emit({ type: 'started' });
+
+	const { timedOut } = await runInSandbox(userId, directory, allFiles, command, TIMEOUT_SEC, {
+		chunk: (stream, text) => {
+			if (stream === 'stderr') stderrAtLineStart = text.endsWith('\n');
+			emit({ type: stream, text });
+		},
+		restarted: () => {
+			stderrAtLineStart = true;
+			emit({ type: 'reset' });
+			if (warning) emit({ type: 'stderr', text: warning });
+		}
+	});
 
 	if (timedOut) {
 		// After the run's own output rather than before it. Everything the solution managed to
 		// print survives the deadline (see runWithDeadline), and it is only worth reading in the
 		// order it happened: the logs are what the solution did, and this is why they stop there.
-		const gap = stderr.length > 0 && !stderr.endsWith('\n') ? '\n' : '';
-		return {
-			stdout,
-			stderr: `${warning}${stderr}${gap}Execution timed out after ${TIMEOUT_SEC} seconds\n`
-		};
+		const gap = stderrAtLineStart ? '' : '\n';
+		emit({ type: 'stderr', text: `${gap}Execution timed out after ${TIMEOUT_SEC} seconds\n` });
 	}
-	return { stdout, stderr: `${warning}${stderr}` };
 }
