@@ -60,7 +60,7 @@ so the only deployed services are the app and Postgres.
 
    The deadline is enforced by `timeout` inside the sandbox, not by `exec`'s own `timeoutSec`, which the SDK implements by closing the WebSocket and so drops whatever the agent had not yet sent — a run that overruns still returns everything it printed, which is the only thing there is to debug it with. exec's timeout stays armed a little later as a backstop. That output only survives the kill if it left the process, so the sandbox env sets `PYTHONUNBUFFERED` and C++ runs under `stdbuf`; Rust, the JVM and Bun already write out as they go
 
-   The endpoint **streams**, in newline-delimited JSON (`RunEvent` in `src/lib/types.ts`), because a minute-long deadline means up to a minute of watching a spinner otherwise. `exec`'s chunk callbacks feed a `RunWatcher`, `run-code.ts` turns those into events, and `src/lib/run-stream.ts` reads them back on the client. Consequences: status codes only mean anything before the first event — a run that fails after that reports an `error` event under a 200; a chunk handler must never throw, since the SDK rejects the exec if one does and a reader closing the tab would otherwise look like a broken sandbox; and a retry onto a fresh VM emits `reset`, because the output so far came from a VM that no longer exists. `RunOutput.svelte` applies chunks one animation frame at a time rather than one line at a time, and keeps the panel pinned to the newest output unless the reader has scrolled away from the bottom
+   The endpoint **streams**, in newline-delimited JSON (`RunEvent` in `src/lib/types.ts`), because a minute-long deadline means up to a minute of watching a spinner otherwise. `exec`'s chunk callbacks feed a `RunWatcher`, `run-code.ts` turns those into events, and `src/lib/run-stream.ts` reads them back on the client. Consequences: status codes only mean anything before the first event — a run that fails after that reports an `error` event under a 200; a chunk handler must never throw, since the SDK rejects the exec if one does and a reader closing the tab would otherwise look like a broken sandbox; and a retry onto a fresh VM emits `reset`, because the output so far came from a VM that no longer exists. `RunOutput.svelte` applies chunks one animation frame at a time rather than one line at a time, and keeps the panel pinned to the newest output unless the reader has scrolled away from the bottom — which is a `md`-and-up behaviour, because only there does the panel own a scroll: below it the panel is as tall as what was printed and the page is what scrolls, so a long stream grows the page instead of following itself
 
    Sandboxes are reused rather than created per submission because booting one costs 2-6s, which put a hello world at 10-15s end to end. Warming also rides on the editor's autosave, so a sandbox that expired during a long think is replaced before Run is pressed. An open tab cannot keep one alive — Railway's idle timer resets only on `exec`, so do not add a keep-alive ping: sandbox cost is essentially memory × wall-clock.
 
@@ -81,14 +81,33 @@ momentum scrolling. Three consequences worth knowing before changing `CodeEditor
   parser. Assembly gained highlighting in the move: Monaco ships no x86 grammar and left it as
   plaintext.
 
-**Mobile:** the on-screen keyboard costs about half the screen, and three things answer for it.
-`MobileKeyBar` supplies the characters a phone keyboard buries and Tab, which it lacks entirely —
-without it Python is unwritable on a phone; its buttons act on `pointerdown` and `preventDefault`,
-because a blurred editor is a dismissed keyboard. The output panel folds to its Run button while
-the editor has focus. And the shell measures `visualViewport` for its height: `dvh` accounts for
-retractable browser chrome but not for the keyboard, so on iOS the bottom of the app would sit
-underneath it. `interactive-widget=resizes-content` in the viewport meta covers Chrome, which
-Safari does not yet honour.
+**Mobile** is a different layout, not the desktop one squeezed. Below `md` the page is an ordinary
+scrolling document: the editor is as tall as the solution (`autoHeight`, floored at `50dvh`), the
+output panel is as tall as what it printed, and the page scrolls once. From `md` up nothing
+changed — the shell is pinned to the viewport, panes scroll individually, and the output pane keeps
+its draggable height. Every rule for this is `md:`-prefixed, so the mobile arrangement is the
+unprefixed default.
+
+Consequences worth knowing:
+
+- Long lines scroll sideways rather than wrapping, which is only bearable because the editor no
+  longer owns a vertical scroll to compete with. `.cm-gutters` carries a `padding-right` for it:
+  the gutter is sticky, so code scrolls underneath, and `.cm-line`'s own padding scrolls away with
+  the text.
+- The editor's font is **16px** on mobile, and must not go below it: iOS zooms the page when you
+  tap an editable element with smaller text, and the editor is the most-tapped thing on the page.
+- `MobileKeyBar` supplies the characters a phone keyboard buries and Tab, which it lacks entirely —
+  without it Python is unwritable on a phone. Its buttons act on `pointerdown` and `preventDefault`,
+  because a blurred editor is a dismissed keyboard. It is `position: fixed`, since a bar in flow
+  would scroll away from the keyboard it belongs to, and it pads `body` so the foot of the page can
+  still be scrolled clear of it.
+- Anything anchored to the viewport on mobile — both drawers, their backdrops, the key bar — must
+  be `fixed`, not `absolute`. Their containers are now as tall as the page.
+- `keyboardInset` (`$lib/viewport.svelte.ts`) is what lifts the key bar clear of the keyboard.
+  `position: fixed` is placed against the layout viewport, which the keyboard does not move;
+  `visualViewport` reports what is actually on screen. `interactive-widget=resizes-content` in the
+  viewport meta makes Chrome shrink the layout viewport itself, so it reads 0 there — Safari does
+  not honour it yet, and that is the case this carries.
 
 **Key directories:**
 - `src/lib/server/` — auth, DB client, code execution, problem fetching

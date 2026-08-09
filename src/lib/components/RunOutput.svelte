@@ -4,18 +4,11 @@
 
 	let {
 		onrun,
-		disabled = false,
-		collapsed = false
+		disabled = false
 	}: {
 		/** Starts a run and reports it as it happens; resolves when the run is over. */
 		onrun: (emit: (event: RunEvent) => void) => Promise<void>;
 		disabled?: boolean;
-		/**
-		 * Drop everything but the header, so the panel shrinks to the Run button alone. Used on a
-		 * phone while the editor has focus, where the keyboard has already taken half the screen and
-		 * output you are not reading is not worth the rest of it.
-		 */
-		collapsed?: boolean;
 	} = $props();
 
 	let running = $state(false);
@@ -135,7 +128,7 @@
 	const showElapsed = $derived(running || elapsedMs > 0);
 </script>
 
-<div class="flex flex-1 flex-col gap-2 overflow-hidden border-t border-border p-3">
+<div class="flex flex-col gap-2 border-t border-border p-3 md:flex-1 md:overflow-hidden">
 	<div class="flex shrink-0 items-center justify-between">
 		<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Output</span>
 		<div class="flex items-center gap-2">
@@ -163,13 +156,17 @@
 		</div>
 	</div>
 
-	{#if collapsed}
-		<!-- header only -->
-	{:else if hasOutput}
+	{#if hasOutput}
+		<!--
+			From `md` up this is a fixed-height pane that scrolls its own output, which is what the
+			follow-the-newest-line behaviour above steers. Below it the panel is as tall as what was
+			printed and the page scrolls instead, so there is nothing here to scroll and `following`
+			idles.
+		-->
 		<div
 			bind:this={panel}
 			onscroll={onScroll}
-			class="flex-1 overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs"
+			class="rounded-md bg-zinc-950 p-3 font-mono text-xs md:flex-1 md:overflow-auto"
 		>
 			{#if stdout}
 				<pre class="whitespace-pre-wrap text-green-400">{stdout}</pre>

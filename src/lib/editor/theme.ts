@@ -73,10 +73,11 @@ const LIGHT: Palette = {
 function chrome(p: Palette, dark: boolean): Extension {
 	return EditorView.theme(
 		{
+			// No height here: whether the editor fills its pane or grows with its content is a
+			// platform decision, and lives in `fillHeight` / `autoHeight` below.
 			'&': {
 				color: p.fg,
-				backgroundColor: p.bg,
-				height: '100%'
+				backgroundColor: p.bg
 			},
 			'.cm-scroller': {
 				fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
@@ -100,7 +101,11 @@ function chrome(p: Palette, dark: boolean): Extension {
 			'.cm-gutters': {
 				backgroundColor: p.bg,
 				color: p.gutterFg,
-				borderRight: 'none'
+				borderRight: 'none',
+				// The gutter is sticky, so scrolled code passes underneath it. `.cm-line`'s own left
+				// padding scrolls away with the text, which leaves nothing between a line number and
+				// the code sliding past it; this is the gap that survives the scroll.
+				paddingRight: '8px'
 			},
 			'.cm-activeLineGutter': {
 				backgroundColor: p.lineHighlight,
@@ -169,6 +174,28 @@ function highlight(p: Palette): Extension {
 		])
 	);
 }
+
+/** Fill the pane and scroll inside it — the desktop arrangement, and what Monaco did. */
+export const fillHeight: Extension = EditorView.theme({
+	'&': { height: '100%' }
+});
+
+/**
+ * Grow with the content instead, so the page scrolls rather than the editor. On a phone a box that
+ * scrolls inside a page that also scrolls is the thing that makes reading a solution a fight; the
+ * minimum keeps a three-line answer from collapsing to a sliver.
+ *
+ * The base theme already gives `.cm-scroller` `overflow-x: auto`, so long lines scroll sideways —
+ * which is why soft wrapping comes off when this goes on. Vertical overflow never triggers,
+ * because the editor is exactly as tall as its content, so a vertical drag scrolls the page.
+ */
+export const autoHeight: Extension = EditorView.theme({
+	'&': { height: 'auto' },
+	'.cm-scroller': { height: 'auto' },
+	// The trailing padding the desktop editor uses to let you scroll past the last line is dead
+	// space here — the editor ends where the code does, and what follows it is the rest of the page.
+	'.cm-content': { minHeight: '50dvh', paddingBottom: '12px' }
+});
 
 export const atomOneDark: Extension = [chrome(DARK, true), highlight(DARK)];
 export const atomOneLight: Extension = [chrome(LIGHT, false), highlight(LIGHT)];

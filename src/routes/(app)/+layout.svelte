@@ -40,21 +40,6 @@
 	// Off-canvas sidebar state, only meaningful below the `md` breakpoint
 	let sidebarOpen = $state(false);
 
-	// The height the shell actually gets. `dvh` accounts for retractable browser chrome but not for
-	// the on-screen keyboard, so on iOS a focused editor leaves the bottom of the app — the key bar,
-	// the Run button — underneath the keyboard. `visualViewport` is the only thing that measures
-	// what is left, and it stays undefined on the server and on desktop, where `dvh` is already right.
-	let viewportHeight = $state<number | undefined>();
-
-	$effect(() => {
-		const viewport = window.visualViewport;
-		if (!viewport) return;
-
-		const measure = () => (viewportHeight = viewport.height);
-		measure();
-		viewport.addEventListener('resize', measure);
-		return () => viewport.removeEventListener('resize', measure);
-	});
 
 	$effect(() => { localStorage.setItem('sidebar-width', String(sidebarWidth)); });
 
@@ -84,12 +69,16 @@
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<div
-	class="flex h-dvh flex-col overflow-hidden"
-	style={viewportHeight ? `height: ${viewportHeight}px` : undefined}
->
+<!--
+	Below `md` the page is an ordinary scrolling document, tall as its content: an editor that grows
+	with the solution beats one that scrolls inside a page that also scrolls. From `md` up the shell
+	is pinned to the viewport and the panes scroll individually, which is what a desktop wants.
+-->
+<div class="flex min-h-dvh flex-col md:h-dvh md:overflow-hidden">
 	<!-- Top nav -->
-	<header class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 md:px-4">
+	<header
+		class="sticky top-0 z-40 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 md:static md:px-4"
+	>
 		<div class="flex min-w-0 items-center gap-2">
 			<button
 				onclick={() => (sidebarOpen = !sidebarOpen)}
@@ -150,11 +139,11 @@
 	<input bind:this={importInput} type="file" accept=".zip" class="hidden" onchange={handleImport} />
 
 	<!-- Body: sidebar + main. Below `md` the sidebar is an off-canvas drawer. -->
-	<div class="relative flex flex-1 overflow-hidden">
+	<div class="relative flex flex-1 md:overflow-hidden">
 		{#if sidebarOpen}
 			<button
 				onclick={() => (sidebarOpen = false)}
-				class="absolute inset-0 z-20 bg-black/50 md:hidden"
+				class="fixed inset-0 z-40 bg-black/50 md:hidden"
 				aria-label="Close problem list"
 				tabindex="-1"
 			></button>
@@ -162,7 +151,7 @@
 
 		<div
 			style="--sidebar-width: {sidebarWidth}px"
-			class="absolute inset-y-0 left-0 z-30 flex w-72 max-w-[85%] shrink-0 transition-transform duration-200 ease-out shadow-xl md:shadow-none
+			class="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85%] shrink-0 transition-transform duration-200 ease-out shadow-xl md:shadow-none
 				md:static md:z-auto md:w-[var(--sidebar-width)] md:max-w-none md:translate-x-0 md:transition-none
 				{sidebarOpen ? 'translate-x-0' : '-translate-x-full'}"
 		>
@@ -175,7 +164,7 @@
 			role="separator"
 			aria-label="Resize sidebar"
 		></div>
-		<main class="flex flex-1 overflow-hidden">
+		<main class="flex min-w-0 flex-1 md:overflow-hidden">
 			{@render children()}
 		</main>
 	</div>
