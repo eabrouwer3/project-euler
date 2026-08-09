@@ -57,6 +57,11 @@ const SANDBOX_ENV = {
 	PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.cargo/bin:/root/.local/bin',
 	HOME: '/root',
 	UV_PYTHON_INSTALL_DIR: '/opt/uv/python',
+	// Python writing to a pipe block-buffers 8K of output and dies with it still unwritten, so a
+	// solution killed at the deadline reported nothing at all — a run that prints its progress
+	// and then overruns is exactly the one worth reading. Unbuffered costs a write per print,
+	// which no solve here is fast enough to notice.
+	PYTHONUNBUFFERED: '1',
 	// Shared across a user's run directories so moving between problems doesn't rebuild every
 	// dependency from scratch. Cargo locks the directory itself, so concurrent runs are safe.
 	CARGO_TARGET_DIR: `${WORKDIR}/.cache/cargo-target`
@@ -211,6 +216,19 @@ async function acquire(): Promise<() => void> {
 }
 
 export type SandboxRun = { stdout: string; stderr: string; timedOut: boolean };
+
+/** How long the deadline waits between its SIGTERM and the SIGKILL that follows. */
+const KILL_GRACE_SEC = 5;
+
+/** `timeout`'s exit status when its deadline fired, and the command's own status otherwise. */
+const TIMEOUT_EXIT_CODE = 124;
+
+/**
+ * Room for the in-sandbox deadline to finish killing the run before exec's own timeout gives up
+ * on it. That backstop exists only for a sandbox that has stopped answering, so it must never be
+ * the thing that ends an ordinary overrun — that path loses the output this one preserves.
+ */
+const BACKSTOP_MARGIN_SEC = KILL_GRACE_SEC + 10;
 
 /**
  * `timeoutSec` on exec only bounds the command once it is running inside the sandbox. Reaching
@@ -497,27 +515,48 @@ export async function runInSandbox(
  * Retires anything the previous run in this directory left behind before starting a new one.
  *
  * With a VM per submission a stray process died with the machine. Reused, a solution that
- * double-forks outlives the exec that started it and then competes for CPU with the next run.
- * Each run records a marker and kills the one before it, which is why the marker is written
- * after the kill rather than before.
+ * outlives the exec that started it — a background child the deadline's signal never reached,
+ * or one that put itself in a session of its own — then competes for CPU with the next run.
+ * Each run records the process group it ran in and kills the group the run before it recorded,
+ * which is why the marker is written after this kill rather than before.
  *
- * The marker is `$$`, the shell's own pid, rather than its real process group. That is the
- * point: if the agent gave this command its own group then `$$` is that group's id and the
- * kill lands exactly on the previous run's tree, and if it did not, `$$` names no group at all
- * and the kill does nothing. Reading the true pgid instead would be strictly worse — a command
- * sharing a group with the guest agent would take the agent down with it. Best-effort by
- * construction, and it fails towards leaving strays rather than towards breaking the sandbox.
+ * Best-effort by construction: a stray that escaped its group is out of reach here too, and
+ * killing a group that no longer exists is a no-op the guard swallows. It fails towards leaving
+ * strays rather than towards breaking the sandbox.
  */
-function reapStrays(): string {
+function killPreviousRun(): string {
+	return `if [ -f .euler.pgid ]; then kill -TERM -"$(cat .euler.pgid)" 2>/dev/null || true; fi`;
+}
+
+/**
+ * Runs the solution under a deadline enforced inside the sandbox.
+ *
+ * `exec`'s own `timeoutSec` would be the obvious way to bound a run, but the SDK enforces it by
+ * closing the WebSocket: output the agent had not yet sent is dropped along with the connection,
+ * and the run that hits the deadline is precisely the run whose output is worth reading. Ending
+ * the command in the sandbox instead lets the exec finish the ordinary way — the pipes drain,
+ * the agent reports an exit status — so a timed out run comes back with everything it printed.
+ * exec's timeout stays armed behind this as a backstop for a sandbox that stops answering.
+ *
+ * TERM first and KILL a few seconds later, so a runtime holding buffered output gets the chance
+ * to flush it. `timeout` puts the command in a process group of its own and signals the whole
+ * group, which is what stops a solution's forked children from surviving their parent — and,
+ * since that group is the pid of `timeout` itself, `$!` is exactly the marker the next run's
+ * reaper needs.
+ */
+function runWithDeadline(command: string, timeoutSec: number): string {
 	return [
-		`if [ -f .euler.pgid ]; then kill -TERM -"$(cat .euler.pgid)" 2>/dev/null || true; fi`,
-		`echo $$ > .euler.pgid`
+		`timeout --kill-after=${KILL_GRACE_SEC}s ${timeoutSec}s bash -c ${shellQuote(command)} &`,
+		`euler_run=$!`,
+		`echo "$euler_run" > .euler.pgid`,
+		// The script's own status, so `timeout`'s TIMEOUT_EXIT_CODE reaches the caller.
+		`wait "$euler_run"`
 	].join('\n');
 }
 
 /**
  * The whole script a run sends: enter the run's directory, retire the previous run's strays,
- * write the sources, then hand over to the language's own command.
+ * write the sources, then hand over to the language's own command under its deadline.
  *
  * cwd stays /app because exec fails outright on a missing directory and a problem's directory
  * may not exist yet; creating it here costs nothing over a round trip to check.
@@ -525,14 +564,15 @@ function reapStrays(): string {
 export function buildScript(
 	directory: string,
 	files: Record<string, string>,
-	command: string
+	command: string,
+	timeoutSec: number
 ): string {
 	return [
 		`mkdir -p ${shellQuote(directory)}`,
 		`cd ${shellQuote(directory)}`,
-		reapStrays(),
+		killPreviousRun(),
 		materialiseFiles(files),
-		command
+		runWithDeadline(command, timeoutSec)
 	]
 		.filter(Boolean)
 		.join('\n');
@@ -558,12 +598,16 @@ async function attempt(
 		await withDeadline(uploadFiles(sandbox, directory, upload), 60_000, 'sandbox file upload');
 		const uploadedAt = performance.now();
 
-		const script = buildScript(directory, inline, command);
+		const script = buildScript(directory, inline, command, timeoutSec);
 
-		// Budget: the command's own allowance plus room for connection setup.
+		// Both budgets sit outside the deadline the script enforces on itself, so each only fires
+		// when the layer below it failed to: exec's when the sandbox stopped answering, and this
+		// one when the connection to it did. Even the outermost stays well inside the five minutes
+		// Railway's proxy allows a request that has sent nothing.
+		const backstopSec = timeoutSec + BACKSTOP_MARGIN_SEC;
 		const result = await withDeadline(
-			sandbox.exec(script, { cwd: WORKDIR, timeoutSec, env: SANDBOX_ENV }),
-			(timeoutSec + 30) * 1000,
+			sandbox.exec(script, { cwd: WORKDIR, timeoutSec: backstopSec, env: SANDBOX_ENV }),
+			(backstopSec + 30) * 1000,
 			'sandbox run'
 		);
 		const executedAt = performance.now();
@@ -577,7 +621,13 @@ async function attempt(
 				`total=${Math.round(executedAt - startedAt)}ms`
 		);
 
-		return { stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut };
+		return {
+			stdout: result.stdout,
+			stderr: result.stderr,
+			// An overrun reports itself through the exit status of the deadline that ended it; the
+			// SDK's own flag means the backstop fired instead, and that run's output is incomplete.
+			timedOut: result.timedOut || result.exitCode === TIMEOUT_EXIT_CODE
+		};
 	} catch (err) {
 		// exec resolves with exitCode for a solution that fails, so a throw is the infrastructure,
 		// not the user's code — retrying re-runs nothing that already ran. Reuse makes this the

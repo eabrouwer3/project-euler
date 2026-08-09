@@ -4,7 +4,14 @@ import { loadProblemAttachments } from './problems.js';
 import { solutionFiles } from '$lib/constants.js';
 import type { Language } from '$lib/types.js';
 
-const TIMEOUT_SEC = 30;
+/**
+ * Project Euler's own guidance is the one-minute rule: a problem is meant to have a solution
+ * that runs in under a minute on a modest machine, and needing longer means the brute force
+ * wants replacing with the insight. So the deadline is that minute — long enough that a solve
+ * meeting the site's own bar is never cut off, and short enough to still say plainly that an
+ * algorithm is the wrong one.
+ */
+const TIMEOUT_SEC = 60;
 
 /**
  * The data files a problem hands out, ready to be written next to the solution.
@@ -132,7 +139,14 @@ export async function runCode(
 			files[source] = code;
 			// g++-15 rather than the sandbox base's g++ 14: the old Dockerfile targeted C++26 via
 			// a GCC 16 PPA that only exists for Ubuntu, and 15 is the closest plain Debian package.
-			command = `g++-15 -O2 -std=c++26 -o main ${source} && ./main`;
+			//
+			// stdbuf line-buffers the program's stdio, so a solution stopped at the deadline has
+			// already written what it printed instead of taking an unflushed 4K of it to the grave —
+			// glibc block-buffers a pipe, which is what a run's stdout is. Only C++ needs the wrapper:
+			// Python has PYTHONUNBUFFERED from the sandbox env, Rust line-buffers stdout of its own
+			// accord, the JVM flushes each println, Bun writes through, and assembly is syscalls.
+			// A solution that turns off `sync_with_stdio` is buffering by hand and keeps its own.
+			command = `g++-15 -O2 -std=c++26 -o main ${source} && stdbuf -oL -eL ./main`;
 			break;
 		}
 		case 'assembly': {
@@ -171,9 +185,13 @@ export async function runCode(
 	);
 
 	if (timedOut) {
+		// After the run's own output rather than before it. Everything the solution managed to
+		// print survives the deadline (see runWithDeadline), and it is only worth reading in the
+		// order it happened: the logs are what the solution did, and this is why they stop there.
+		const gap = stderr.length > 0 && !stderr.endsWith('\n') ? '\n' : '';
 		return {
 			stdout,
-			stderr: `${warning}Execution timed out after ${TIMEOUT_SEC} seconds\n${stderr}`
+			stderr: `${warning}${stderr}${gap}Execution timed out after ${TIMEOUT_SEC} seconds\n`
 		};
 	}
 	return { stdout, stderr: `${warning}${stderr}` };

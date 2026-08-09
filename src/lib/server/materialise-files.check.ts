@@ -95,22 +95,32 @@ assert(multi['a.txt'] === 'alpha' && multi['b.txt'] === 'beta', 'multiple files 
 
 // --- the full script a run sends -------------------------------------------------------------
 
+/** Longer than any command here needs, so only the tests about the deadline ever meet it. */
+const NO_DEADLINE = 30;
+
 /** Runs a complete script in a scratch dir standing in for /app, and reports what it produced. */
 function runScript(
 	directory: string,
 	files: Record<string, string>,
-	command: string
-): { stdout: string; root: string } {
+	command: string,
+	options: { timeoutSec?: number; expectStatus?: number } = {}
+): { stdout: string; stderr: string; elapsedMs: number; root: string } {
+	const { timeoutSec = NO_DEADLINE, expectStatus = 0 } = options;
 	const root = mkdtempSync(join(tmpdir(), 'euler-script-'));
-	const script = buildScript(directory, files, command);
+	const script = buildScript(directory, files, command, timeoutSec);
 
 	const parsed = spawnSync('bash', ['-n'], { input: script });
 	assert(parsed.status === 0, `script is not valid shell: ${parsed.stderr}`);
 
+	const startedAt = Date.now();
 	const ran = spawnSync('bash', ['-s'], { input: script, cwd: root, encoding: 'utf8' });
-	assert(ran.status === 0, `script failed: ${ran.stderr}`);
+	const elapsedMs = Date.now() - startedAt;
+	assert(
+		ran.status === expectStatus,
+		`script exited ${ran.status}, expected ${expectStatus}: ${ran.stderr}`
+	);
 
-	return { stdout: ran.stdout, root };
+	return { stdout: ran.stdout, stderr: ran.stderr, elapsedMs, root };
 }
 
 // The solution must land in its own directory and run there, not in the parent.
@@ -125,7 +135,7 @@ for (const [dir, body] of [
 	['p2-python', 'print(2)']
 ]) {
 	const ran = spawnSync('bash', ['-s'], {
-		input: buildScript(dir, { 'main.py': body }, 'true'),
+		input: buildScript(dir, { 'main.py': body }, 'true', NO_DEADLINE),
 		cwd: shared
 	});
 	assert(ran.status === 0, `writing ${dir} failed: ${ran.stderr}`);
@@ -142,7 +152,7 @@ rmSync(shared, { recursive: true, force: true });
 const repeat = mkdtempSync(join(tmpdir(), 'euler-repeat-'));
 for (let i = 0; i < 3; i++) {
 	const ran = spawnSync('bash', ['-s'], {
-		input: buildScript('p7-cpp', { 'main.cpp': `// run ${i}` }, 'echo ran'),
+		input: buildScript('p7-cpp', { 'main.cpp': `// run ${i}` }, 'echo ran', NO_DEADLINE),
 		cwd: repeat,
 		encoding: 'utf8'
 	});
@@ -152,6 +162,41 @@ for (let i = 0; i < 3; i++) {
 rmSync(repeat, { recursive: true, force: true });
 
 rmSync(solve.root, { recursive: true, force: true });
+
+// --- the deadline ----------------------------------------------------------------------------
+
+// A solution that overruns is the one whose output is worth reading, so the deadline must end it
+// without taking what it printed. Both streams, since a print-and-overrun debugs on either.
+const overrun = runScript(
+	'p10-python',
+	{ 'main.py': 'print(1)' },
+	'echo partial; echo halfway >&2; sleep 30',
+	{ timeoutSec: 1, expectStatus: 124 }
+);
+assert(overrun.stdout.includes('partial'), `stdout was lost at the deadline: ${overrun.stdout}`);
+assert(overrun.stderr.includes('halfway'), `stderr was lost at the deadline: ${overrun.stderr}`);
+rmSync(overrun.root, { recursive: true, force: true });
+
+// The deadline signals the whole process group, so a solution's children go with it. If one
+// outlived the run it would hold the output pipe open, and the run would hang far past its
+// deadline waiting on a process nobody is reading — which is what this measures.
+const forked = runScript(
+	'p11-python',
+	{ 'main.py': 'print(1)' },
+	'echo forked; sleep 30 & sleep 30',
+	{ timeoutSec: 1, expectStatus: 124 }
+);
+assert(forked.stdout.includes('forked'), `output was lost at the deadline: ${forked.stdout}`);
+assert(forked.elapsedMs < 15_000, `a forked child outlived the deadline (${forked.elapsedMs}ms)`);
+rmSync(forked.root, { recursive: true, force: true });
+
+// A run that ends on its own keeps its own exit status: a compilation that failed must not be
+// reported to the reader as having run out of time.
+const failed = runScript('p12-cpp', { 'main.cpp': '// nothing' }, 'echo built >&2; exit 1', {
+	expectStatus: 1
+});
+assert(failed.stderr.includes('built'), `a failing run lost its diagnostics: ${failed.stderr}`);
+rmSync(failed.root, { recursive: true, force: true });
 
 // --- what travels in the command, and what does not ------------------------------------------
 
@@ -166,7 +211,7 @@ assert(split.upload['names.txt'] === names, 'a data file was not routed to the u
 assert(split.inline['main.py'] === 'print(1)', 'a solution should still ride in the command');
 assert(Object.keys(split.upload).length === 1, 'a solution should not be uploaded');
 
-const script = buildScript('p22-python', split.inline, 'python3.13 main.py');
+const script = buildScript('p22-python', split.inline, 'python3.13 main.py', NO_DEADLINE);
 assert(!script.includes('"PATRICIA"'), 'uploaded contents leaked into the script');
 assert(script.length < 1024, `script should stay small, got ${script.length} bytes`);
 
