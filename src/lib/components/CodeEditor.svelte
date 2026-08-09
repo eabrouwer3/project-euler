@@ -30,21 +30,18 @@
 	import { mode } from 'mode-watcher';
 	import { compact } from '$lib/compact.svelte.js';
 	import { INDENT_WIDTH, languageExtension } from '$lib/editor/languages.js';
-	import { editorTheme } from '$lib/editor/theme.js';
+	import { autoHeight, editorTheme, fillHeight } from '$lib/editor/theme.js';
 	import MobileKeyBar from './MobileKeyBar.svelte';
 	import type { Language } from '$lib/types.js';
 
 	let {
 		code = $bindable(''),
 		language,
-		onchange,
-		onfocuschange
+		onchange
 	}: {
 		code?: string;
 		language: Language;
 		onchange?: (value: string) => void;
-		/** Fires as the editor gains and loses focus, which on a phone is the keyboard coming and going. */
-		onfocuschange?: (focused: boolean) => void;
 	} = $props();
 
 	let container: HTMLDivElement | undefined = $state();
@@ -66,11 +63,16 @@
 	 * `drawSelection` is the significant one: it hides the native selection and paints its own,
 	 * which is what makes multiple cursors visible — and which on touch takes away the handles and
 	 * magnifier the platform would have drawn. Desktop keeps it, touch gets the browser's.
+	 *
+	 * Height is the other. A phone gets an editor as tall as its content, inside a page that
+	 * scrolls; a desktop gets one that fills its pane and scrolls inside it. Long lines then scroll
+	 * sideways rather than wrapping, which is only bearable because the editor no longer owns the
+	 * vertical scroll it would be competing with.
 	 */
 	function platformExtensions(isCompact: boolean): Extension {
 		return isCompact
-			? [EditorView.lineWrapping]
-			: [drawSelection(), rectangularSelection(), crosshairCursor()];
+			? [autoHeight]
+			: [fillHeight, drawSelection(), rectangularSelection(), crosshairCursor()];
 	}
 
 	function baseExtensions(): Extension {
@@ -109,10 +111,7 @@
 				translate: 'no'
 			}),
 			EditorView.updateListener.of((update) => {
-				if (update.focusChanged) {
-					focused = update.view.hasFocus;
-					onfocuschange?.(focused);
-				}
+				if (update.focusChanged) focused = update.view.hasFocus;
 				if (!update.docChanged) return;
 				if (update.transactions.some((tr) => tr.annotation(External))) return;
 				const value = update.state.doc.toString();
@@ -196,8 +195,13 @@
 	});
 </script>
 
-<div class="flex h-full w-full flex-col overflow-hidden">
-	<div bind:this={container} class="min-h-0 flex-1 overflow-hidden"></div>
+<!--
+	On a phone this wrapper is as tall as the editor inside it and the page scrolls; from `md` up it
+	fills the pane it was given and the editor scrolls inside. The key bar is fixed to the viewport
+	rather than sitting here in flow, so it is not affected either way.
+-->
+<div class="flex w-full flex-col md:h-full md:overflow-hidden">
+	<div bind:this={container} class="md:min-h-0 md:flex-1 md:overflow-hidden"></div>
 	{#if compact.current && focused}
 		<MobileKeyBar {view} {language} />
 	{/if}
@@ -208,18 +212,14 @@
 		font-size: 14px;
 	}
 
-	/* Slightly larger on a phone, where the editor is a fraction of the width it gets on a desktop
-	   and 14px mono stops being comfortable. Stated after the base rule, which it has to beat on
-	   source order — the two selectors carry the same specificity. */
+	/* 16px exactly, on a phone. Below it iOS treats a tap on an editable element as an invitation
+	   to zoom the page in, and the editor is the one element on the page you tap the most. Stated
+	   after the base rule, which it has to beat on source order — the two selectors carry the same
+	   specificity. */
 	@media (max-width: 767px) {
 		:global(.cm-editor .cm-scroller) {
-			font-size: 15px;
+			font-size: 16px;
 		}
-	}
-
-	/* The editor owns its scrolling; without this the outer flex column can be dragged instead. */
-	:global(.cm-editor) {
-		height: 100%;
 	}
 
 	:global(.cm-editor.cm-focused) {

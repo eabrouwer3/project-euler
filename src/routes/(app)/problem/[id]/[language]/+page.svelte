@@ -9,7 +9,6 @@
 	import RunOutput from '$lib/components/RunOutput.svelte';
 	import WorkingDirectory from '$lib/components/WorkingDirectory.svelte';
 	import { SUPPORTS_PACKAGES } from '$lib/constants.js';
-	import { compact } from '$lib/compact.svelte.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { BookOpen } from '@lucide/svelte';
 	import type { Language, SolutionStatus } from '$lib/types.js';
@@ -32,12 +31,6 @@
 
 	// Off-canvas problem description, only meaningful below the `md` breakpoint
 	let problemOpen = $state(false);
-
-	// On a phone the keyboard already costs about half the screen, so an editor that also gives 40%
-	// of what is left to the output panel is a four-line editor. While it has focus, the panel folds
-	// down to its Run button and hands the space back.
-	let editorFocused = $state(false);
-	const editing = $derived(compact.current && editorFocused);
 
 	$effect(() => { localStorage.setItem('problem-width', String(problemWidth)); });
 	$effect(() => { localStorage.setItem('output-height', String(outputHeight)); });
@@ -151,11 +144,13 @@
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<div class="relative flex flex-1 overflow-hidden">
+<div class="relative flex min-w-0 flex-1 md:overflow-hidden">
 	<!-- Editor panel -->
-	<div class="flex min-w-0 flex-1 flex-col overflow-hidden">
+	<div class="flex min-w-0 flex-1 flex-col md:overflow-hidden">
 		<!-- Toolbar -->
-		<div class="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-card px-3 md:gap-3">
+		<div
+			class="sticky top-12 z-30 flex h-10 shrink-0 items-center gap-2 border-b border-border bg-card px-3 md:static md:gap-3"
+		>
 			<LanguageSelector value={data.language} onchange={onLanguageChange} />
 			{#if saveStatus === 'saving'}
 				<span class="text-xs text-muted-foreground">Saving…</span>
@@ -191,21 +186,15 @@
 			</Button>
 		</div>
 
-		<!-- Code editor -->
-		<div class="min-h-0 flex-1 overflow-hidden">
-			<CodeEditor
-				bind:code
-				language={data.language}
-				onchange={(val) => scheduleAutosave(val)}
-				onfocuschange={(f) => (editorFocused = f)}
-			/>
+		<!-- Code editor. Below `md` it is as tall as the solution; from `md` up it fills the pane. -->
+		<div class="md:min-h-0 md:flex-1 md:overflow-hidden">
+			<CodeEditor bind:code language={data.language} onchange={(val) => scheduleAutosave(val)} />
 		</div>
 
 		<!-- Bottom panels: stacked under the editor at every size -->
 		<div
 			style="--output-height: {outputHeight}px"
-			class="flex shrink-0 flex-col border-t border-border md:h-[var(--output-height)]
-				{editing ? 'h-auto' : 'h-2/5'}"
+			class="flex shrink-0 flex-col border-t border-border md:h-[var(--output-height)]"
 		>
 			<div
 				class="hidden h-1 shrink-0 cursor-row-resize transition-colors hover:bg-primary/30 md:block"
@@ -213,22 +202,11 @@
 				role="separator"
 				aria-label="Resize output panel"
 			></div>
-			<!--
-				Hidden rather than unmounted while editing, so the package field keeps what is in it.
-				Inline `display` because `contents` and `hidden` are the same Tailwind property and
-				which one won would come down to stylesheet order.
-			-->
-			<div style={editing ? 'display:none' : 'display:contents'}>
-				{#if SUPPORTS_PACKAGES[data.language]}
-					<PackageInput bind:packages onchange={(pkgs) => scheduleAutosave(code, pkgs)} />
-				{/if}
-				<WorkingDirectory
-					language={data.language}
-					{packages}
-					attachments={data.attachments}
-				/>
-			</div>
-			<RunOutput onrun={runSolution} disabled={saveStatus === 'saving'} collapsed={editing} />
+			{#if SUPPORTS_PACKAGES[data.language]}
+				<PackageInput bind:packages onchange={(pkgs) => scheduleAutosave(code, pkgs)} />
+			{/if}
+			<WorkingDirectory language={data.language} {packages} attachments={data.attachments} />
+			<RunOutput onrun={runSolution} disabled={saveStatus === 'saving'} />
 		</div>
 	</div>
 
@@ -236,7 +214,7 @@
 	{#if problemOpen}
 		<button
 			onclick={() => (problemOpen = false)}
-			class="absolute inset-0 z-20 bg-black/50 md:hidden"
+			class="fixed inset-0 z-40 bg-black/50 md:hidden"
 			aria-label="Hide problem"
 			tabindex="-1"
 		></button>
@@ -253,7 +231,7 @@
 	<!-- Problem description. Below `md` it slides in from the right. -->
 	<div
 		style="--problem-width: {problemWidth}px"
-		class="absolute inset-y-0 right-0 z-30 flex w-[85%] max-w-sm shrink-0 transition-transform duration-200 ease-out shadow-xl md:shadow-none
+		class="fixed inset-y-0 right-0 z-50 flex w-[85%] max-w-sm shrink-0 transition-transform duration-200 ease-out shadow-xl md:shadow-none
 			md:static md:z-auto md:w-[var(--problem-width)] md:max-w-none md:translate-x-0 md:transition-none
 			{problemOpen ? 'translate-x-0' : 'translate-x-full'}"
 	>

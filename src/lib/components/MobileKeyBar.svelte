@@ -6,12 +6,26 @@
 	import { insertBracket } from '@codemirror/autocomplete';
 	import { EditorView } from '@codemirror/view';
 	import { MOBILE_KEYS } from '$lib/constants.js';
+	import { keyboardInset } from '$lib/viewport.svelte.js';
 	import type { Language } from '$lib/types.js';
 	import { ChevronDown, Redo2, Undo2 } from '@lucide/svelte';
 
 	let { view, language }: { view: EditorView | undefined; language: Language } = $props();
 
 	const keys = $derived(MOBILE_KEYS[language]);
+
+	const HEIGHT = 44;
+
+	// The bar is out of flow, so the foot of the page would otherwise be unreachable underneath it.
+	// The padding gives the document somewhere to scroll to; it is on `body` because that is what
+	// scrolls once the mobile layout stops constraining its own height.
+	$effect(() => {
+		const clearance = HEIGHT + keyboardInset.current;
+		document.body.style.paddingBottom = `${clearance}px`;
+		return () => {
+			document.body.style.paddingBottom = '';
+		};
+	});
 
 	/**
 	 * Touching a button would otherwise blur the editor, and a blurred editor on a phone means the
@@ -33,8 +47,13 @@
 	}
 </script>
 
+<!--
+	Fixed to the viewport, lifted clear of the keyboard. It cannot sit in the document flow: the
+	page scrolls on a phone now, and a bar in flow would scroll away from the keyboard it belongs to.
+-->
 <div
-	class="flex shrink-0 items-stretch border-t border-border bg-card text-sm"
+	class="fixed inset-x-0 z-40 flex items-stretch border-t border-border bg-card text-sm"
+	style="bottom: {keyboardInset.current}px"
 	role="toolbar"
 	aria-label="Editor keys"
 >
