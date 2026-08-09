@@ -71,14 +71,22 @@ export const SUPPORTS_PACKAGES: Record<Language, boolean> = {
 	assembly: false
 };
 
-/** Monaco ships no x86 assembly grammar (only MIPS), so assembly falls back to unhighlighted text. */
-export const MONACO_LANGUAGE: Record<Language, string> = {
-	python: 'python',
-	typescript: 'typescript',
-	clojure: 'clojure',
-	rust: 'rust',
-	cpp: 'cpp',
-	assembly: 'plaintext'
+/**
+ * The characters the mobile key bar offers above the on-screen keyboard, per language. Phone
+ * keyboards bury every one of these behind at least one modifier page, and some — `|`, `~`, `%`
+ * — behind two, which is what makes writing code on them miserable.
+ *
+ * Ordered by how often the language actually needs them, because the row scrolls: whatever sits
+ * past the sixth or seventh key is a swipe away, so brackets lead everywhere and the language's
+ * own punctuation comes next.
+ */
+export const MOBILE_KEYS: Record<Language, string[]> = {
+	python: [':', '(', ')', '[', ']', '{', '}', "'", '"', '_', '=', '<', '>', '#', '%', '*', '+', '-', '/', ',', '.', '|', '&'],
+	typescript: ['(', ')', '{', '}', '[', ']', "'", '"', '`', '=', '>', '<', ';', ':', '.', ',', '&', '|', '!', '?', '+', '-', '*', '/', '%', '$', '_'],
+	clojure: ['(', ')', '[', ']', '{', '}', '"', '-', '>', '<', ':', '#', "'", '=', '?', '!', '*', '%', '_', '.', '/', '&'],
+	rust: ['(', ')', '{', '}', '[', ']', '<', '>', '&', ':', ';', '"', "'", '!', '?', '=', '|', '_', '.', ',', '*', '+', '-', '/', '%', '#'],
+	cpp: ['(', ')', '{', '}', '[', ']', '<', '>', '"', "'", ';', ':', '&', '*', '=', '!', '|', '+', '-', '/', '%', '#', '.', ',', '_'],
+	assembly: ['%', '$', '.', ',', '(', ')', '#', ':', '-', '+', '*', '_', '[', ']', '<', '>', '=', '@', '/']
 };
 
 /**

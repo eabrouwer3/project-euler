@@ -40,6 +40,22 @@
 	// Off-canvas sidebar state, only meaningful below the `md` breakpoint
 	let sidebarOpen = $state(false);
 
+	// The height the shell actually gets. `dvh` accounts for retractable browser chrome but not for
+	// the on-screen keyboard, so on iOS a focused editor leaves the bottom of the app — the key bar,
+	// the Run button — underneath the keyboard. `visualViewport` is the only thing that measures
+	// what is left, and it stays undefined on the server and on desktop, where `dvh` is already right.
+	let viewportHeight = $state<number | undefined>();
+
+	$effect(() => {
+		const viewport = window.visualViewport;
+		if (!viewport) return;
+
+		const measure = () => (viewportHeight = viewport.height);
+		measure();
+		viewport.addEventListener('resize', measure);
+		return () => viewport.removeEventListener('resize', measure);
+	});
+
 	$effect(() => { localStorage.setItem('sidebar-width', String(sidebarWidth)); });
 
 	// Picking a problem should close the drawer on mobile
@@ -68,7 +84,10 @@
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<div class="flex h-dvh flex-col overflow-hidden">
+<div
+	class="flex h-dvh flex-col overflow-hidden"
+	style={viewportHeight ? `height: ${viewportHeight}px` : undefined}
+>
 	<!-- Top nav -->
 	<header class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 md:px-4">
 		<div class="flex min-w-0 items-center gap-2">

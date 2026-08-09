@@ -37,7 +37,7 @@ Docker Compose provides PostgreSQL at `localhost:5432` with default credentials 
 
 ## Architecture
 
-**Stack:** Bun (runtime + package manager), SvelteKit 2 + Svelte 5, TypeScript, Tailwind CSS 4, shadcn/ui (bits-ui), Drizzle ORM, PostgreSQL, Auth.js (GitHub OAuth), Monaco Editor, KaTeX, Railway Sandboxes for code execution.
+**Stack:** Bun (runtime + package manager), SvelteKit 2 + Svelte 5, TypeScript, Tailwind CSS 4, shadcn/ui (bits-ui), Drizzle ORM, PostgreSQL, Auth.js (GitHub OAuth), CodeMirror 6, KaTeX, Railway Sandboxes for code execution.
 
 **Runtime:** Everything runs on Bun, but the app deliberately keeps the
 first-party `@sveltejs/adapter-node` rather than a Bun-specific adapter — its
@@ -62,8 +62,34 @@ so the only deployed services are the app and Postgres.
 
    **The isolation boundary between users is the VM, not the filesystem.** A user has root in their own sandbox and can read all of it; it holds only the toolchain and their own solutions. Each run gets its own directory (`/app/p<problem>-<language>`) purely so runs don't overwrite each other — that is correctness, not security, and nothing may rely on it to separate people. Sandboxes have full outbound internet in both network modes (that is how dependency installs work); `ISOLATED` only keeps them off the private network, so the app and Postgres are unreachable. Never pass a credential in the sandbox env: per-exec values travel in the command string and are visible to `ps` inside the sandbox.
 
+**Editor:** CodeMirror 6, chosen over Monaco for the phone. Monaco implements text editing itself
+over a hidden textarea and is unsupported in mobile browsers; CodeMirror edits inside a real
+`contenteditable`, which is what gives back the platform's selection handles, magnifier, IME and
+momentum scrolling. Three consequences worth knowing before changing `CodeEditor.svelte`:
+
+- The view is built **once**, inside `untrack`. It seeds itself from `code`, `mode` and `compact`,
+  and without `untrack` those become effect dependencies — every keystroke would rebuild the view
+  and take the focus, selection and undo history with it. Language, theme and platform all change
+  through compartments instead, never by re-creating the view.
+- `drawSelection` is desktop-only. It paints its own selection over the native one, which is what
+  makes multiple cursors visible and what would take the touch handles away.
+- Grammars load on demand, one chunk per language, so a Python solver never downloads the C++
+  parser. Assembly gained highlighting in the move: Monaco ships no x86 grammar and left it as
+  plaintext.
+
+**Mobile:** the on-screen keyboard costs about half the screen, and three things answer for it.
+`MobileKeyBar` supplies the characters a phone keyboard buries and Tab, which it lacks entirely —
+without it Python is unwritable on a phone; its buttons act on `pointerdown` and `preventDefault`,
+because a blurred editor is a dismissed keyboard. The output panel folds to its Run button while
+the editor has focus. And the shell measures `visualViewport` for its height: `dvh` accounts for
+retractable browser chrome but not for the keyboard, so on iOS the bottom of the app would sit
+underneath it. `interactive-widget=resizes-content` in the viewport meta covers Chrome, which
+Safari does not yet honour.
+
 **Key directories:**
 - `src/lib/server/` — auth, DB client, code execution, problem fetching
+- `src/lib/editor/` — CodeMirror wiring: the Atom One themes ported from Monaco, and the
+  per-language grammar and indent width
 - `src/lib/server/sandbox.ts` — the sandbox layer: toolchain template, checkpoint lifecycle, and running one command in a throwaway VM
 - `src/lib/server/run-code.ts` — maps a language and its packages to the files and command that produce the solution's output
 - `src/lib/components/` — Svelte UI components (CodeEditor, ProblemDescription, RunOutput, etc.)
