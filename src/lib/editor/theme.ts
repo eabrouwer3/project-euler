@@ -12,6 +12,8 @@ type Palette = {
 	fg: string;
 	lineHighlight: string;
 	selection: string;
+	/** Other occurrences of the selected word, and search hits — never the selection itself. */
+	matchHighlight: string;
 	cursor: string;
 	gutterFg: string;
 	gutterActiveFg: string;
@@ -28,11 +30,19 @@ type Palette = {
 	property: string;
 };
 
+/**
+ * Atom One Dark's own selection is `#3e4451`, a grey barely two shades off the `#282c34`
+ * background — about 1.4:1 against it, so on anything but a very good monitor a selection is
+ * invisible. The blue below is ~2:1 against the background while still leaving the `#abb2bf`
+ * text above 3:1 against it, and it is a hue the theme already carries (the cursor is `#528bff`),
+ * so a selection now reads as one rather than as a smudge.
+ */
 const DARK: Palette = {
 	bg: '#282c34',
 	fg: '#abb2bf',
 	lineHighlight: '#2c313c',
-	selection: '#3e4451',
+	selection: '#3b5a80',
+	matchHighlight: '#6b5628',
 	cursor: '#528bff',
 	gutterFg: '#4b5263',
 	gutterActiveFg: '#abb2bf',
@@ -49,11 +59,13 @@ const DARK: Palette = {
 	property: '#e06c75'
 };
 
+/** Same treatment on the light side, where Atom's `#d0d0d0` on `#fafafa` was as faint. */
 const LIGHT: Palette = {
 	bg: '#fafafa',
 	fg: '#383a42',
 	lineHighlight: '#f0f0f0',
-	selection: '#d0d0d0',
+	selection: '#9dbfe8',
+	matchHighlight: '#ecd070',
 	cursor: '#526fff',
 	gutterFg: '#9d9d9f',
 	gutterActiveFg: '#383a42',
@@ -117,10 +129,10 @@ function chrome(p: Palette, dark: boolean): Extension {
 				color: p.comment
 			},
 			'.cm-matchingBracket, .cm-nonmatchingBracket': {
-				backgroundColor: p.selection,
+				backgroundColor: p.matchHighlight,
 				outline: `1px solid ${p.gutterFg}`
 			},
-			'.cm-selectionMatch': { backgroundColor: p.selection },
+			'.cm-selectionMatch': { backgroundColor: p.matchHighlight },
 			'.cm-panels': { backgroundColor: p.panel, color: p.fg },
 			'.cm-panels input, .cm-panels button': {
 				backgroundColor: p.bg,
@@ -129,7 +141,7 @@ function chrome(p: Palette, dark: boolean): Extension {
 				borderRadius: '4px',
 				padding: '2px 6px'
 			},
-			'.cm-searchMatch': { backgroundColor: p.selection },
+			'.cm-searchMatch': { backgroundColor: p.matchHighlight },
 			'.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: p.cursor, color: p.bg },
 			'.cm-tooltip': {
 				backgroundColor: p.panel,
