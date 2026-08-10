@@ -151,14 +151,32 @@ export async function runCode(
 			// already written what it printed instead of taking an unflushed 4K of it to the grave —
 			// glibc block-buffers a pipe, which is what a run's stdout is. Only C++ needs the wrapper:
 			// Python has PYTHONUNBUFFERED from the sandbox env, Rust line-buffers stdout of its own
-			// accord, the JVM flushes each println, Bun writes through, and assembly is syscalls.
+			// accord, the JVM flushes each println, Bun writes through, and assembly is syscalls —
+			// which qemu passes through as they happen, so emulation adds no buffer of its own.
 			// A solution that turns off `sync_with_stdio` is buffering by hand and keeps its own.
 			command = `g++-15 -O2 -std=c++26 -o main ${source} && stdbuf -oL -eL ./main`;
 			break;
 		}
 		case 'assembly': {
 			files[source] = code;
-			command = `as -o main.o ${source} && ld -o main main.o && ./main`;
+			// AArch64, cross-assembled and emulated, because the sandbox itself is x86-64: the
+			// binutils cross target produces the object and links it, and qemu's user-mode
+			// emulator runs the result by translating its instructions and handing the syscalls
+			// to the host kernel. Unqualified `as` and `ld` are still the host's, so the prefix
+			// is the whole of what picks the architecture — without it this assembles as x86-64
+			// again, and says so as a wall of "no such instruction" rather than a wrong target.
+			//
+			// Emulation costs a few times native speed, which is worth knowing against the
+			// one-minute deadline: an ARM solve has less real machine under it than the same
+			// algorithm anywhere else here. Nothing avoids that while the host stays x86-64, and
+			// a solve meeting Project Euler's own bar has the margin to absorb it.
+			//
+			// The binary is static, so qemu is the entire runtime beneath it — as on x86, a
+			// solution here talks to the kernel directly and links no libc.
+			command =
+				`aarch64-linux-gnu-as -o main.o ${source} && ` +
+				`aarch64-linux-gnu-ld -o main main.o && ` +
+				`qemu-aarch64-static ./main`;
 			break;
 		}
 	}
