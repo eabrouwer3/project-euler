@@ -113,6 +113,13 @@ function toolchainTemplate() {
 				'unzip',
 				'build-essential',
 				'binutils',
+				// Assembly is AArch64 on an x86-64 host, so it needs both halves of a cross
+				// target: the cross binutils to assemble and link it, and qemu's user-mode
+				// emulator to run what comes out. The -static build is the one to install —
+				// the dynamically linked qemu-user wants the guest architecture's shared
+				// libraries present, which on this base they are not.
+				'binutils-aarch64-linux-gnu',
+				'qemu-user-static',
 				'openjdk-21-jdk-headless'
 			)
 			// C++26. The Dockerfile reached GCC 16 through an Ubuntu-only PPA that has no Debian

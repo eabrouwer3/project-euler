@@ -21,6 +21,11 @@ int main() {
     std::cout << "Hello, World!" << std::endl;
 }
 `,
+	// AArch64, and `//` opens the comments rather than `#`: on this architecture `#` is the
+	// immediate prefix, and gas rejects `mov x0, #1 # write` outright ("unexpected characters
+	// following instruction"). An address is two instructions because a 64-bit one does not fit
+	// in a 32-bit encoding — adrp lands on msg's 4K page and the :lo12: relocation adds the
+	// offset within it.
 	assembly: `        .section .rodata
 msg:    .ascii  "Hello, World!\\n"
         .set    msglen, . - msg
@@ -28,15 +33,16 @@ msg:    .ascii  "Hello, World!\\n"
         .section .text
         .globl  _start
 _start:
-        movq    $1, %rax                # write
-        movq    $1, %rdi                # stdout
-        leaq    msg(%rip), %rsi
-        movq    $msglen, %rdx
-        syscall
+        mov     x0, #1                  // stdout
+        adrp    x1, msg
+        add     x1, x1, :lo12:msg
+        mov     x2, #msglen
+        mov     x8, #64                 // write
+        svc     #0
 
-        movq    $60, %rax               # exit
-        xorq    %rdi, %rdi
-        syscall
+        mov     x0, #0                  // status
+        mov     x8, #93                 // exit
+        svc     #0
 `
 };
 
@@ -46,7 +52,7 @@ export const LANGUAGE_LABELS: Record<Language, string> = {
 	clojure: 'Clojure 1.12 (Java 21)',
 	rust: 'Rust (stable)',
 	cpp: 'C++26 (GCC 16)',
-	assembly: 'x86-64 Assembly (GNU as)'
+	assembly: 'AArch64 Assembly (GNU as)'
 };
 
 export const LANGUAGE_ABBR: Record<Language, string> = {
@@ -86,7 +92,9 @@ export const MOBILE_KEYS: Record<Language, string[]> = {
 	clojure: ['(', ')', '[', ']', '{', '}', '"', '-', '>', '<', ':', '#', "'", '=', '?', '!', '*', '%', '_', '.', '/', '&'],
 	rust: ['(', ')', '{', '}', '[', ']', '<', '>', '&', ':', ';', '"', "'", '!', '?', '=', '|', '_', '.', ',', '*', '+', '-', '/', '%', '#'],
 	cpp: ['(', ')', '{', '}', '[', ']', '<', '>', '"', "'", ';', ':', '&', '*', '=', '!', '|', '+', '-', '/', '%', '#', '.', ',', '_'],
-	assembly: ['%', '$', '.', ',', '(', ')', '#', ':', '-', '+', '*', '_', '[', ']', '<', '>', '=', '@', '/']
+	// `#` and `[` lead because AArch64 spells every immediate and every load with them; `%` and
+	// `$` are gone with AT&T syntax, which had no other user.
+	assembly: ['#', ',', '[', ']', ':', '.', '/', '!', '=', '-', '+', '*', '_', '(', ')', '<', '>', '&', '|']
 };
 
 /**

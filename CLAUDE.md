@@ -56,7 +56,7 @@ so the only deployed services are the app and Postgres.
 1. Problem list and descriptions are fetched from `projecteuler.net/minimal=*` and cached in-memory (the list for 1 hour, a description for the life of the process). Descriptions link images, data files and other problems relative to projecteuler.net's document root, so `resolveLinks` absolutises them — without it every problem image renders broken
 2. Problems that hand out a data file (`names.txt` for 22, `triangle.txt` for 67) get it written into the run's working directory, so a solution can just open it by name. The file lands under the name the problem's own text uses, with the other spelling symlinked, and byte-for-byte — `materialiseFiles` adds no trailing newline, because problem 22's file ends without one. Small files ride inside the exec command; anything over `MAX_INLINE_BYTES` goes through the sandbox files API instead and stays on the VM for later runs. `exec` ships the script as one WebSocket frame, and problem 22's 46K list failed the exec when it travelled that way
 3. User solutions are stored in PostgreSQL (one row per user + problem + language)
-4. Code execution: `POST /api/run` runs one command with a 60s timeout — Project Euler's own one-minute rule — in a **Railway Sandbox**: a VM booted from a toolchain checkpoint, held per user and reused across their runs. Opening a problem warms one in the background; it expires ~5 minutes after the last run. Supports Python, TypeScript (Bun), Clojure, Rust, C++, and x86-64 assembly (GNU as)
+4. Code execution: `POST /api/run` runs one command with a 60s timeout — Project Euler's own one-minute rule — in a **Railway Sandbox**: a VM booted from a toolchain checkpoint, held per user and reused across their runs. Opening a problem warms one in the background; it expires ~5 minutes after the last run. Supports Python, TypeScript (Bun), Clojure, Rust, C++, and AArch64 assembly (GNU as). Assembly is the one language that does not run on the host's own architecture: the sandbox is x86-64, so a solution is assembled by the `aarch64-linux-gnu` cross binutils and run under `qemu-aarch64-static`, which costs a few times native speed against the one-minute deadline
 
    The deadline is enforced by `timeout` inside the sandbox, not by `exec`'s own `timeoutSec`, which the SDK implements by closing the WebSocket and so drops whatever the agent had not yet sent — a run that overruns still returns everything it printed, which is the only thing there is to debug it with. exec's timeout stays armed a little later as a backstop. That output only survives the kill if it left the process, so the sandbox env sets `PYTHONUNBUFFERED` and C++ runs under `stdbuf`; Rust, the JVM and Bun already write out as they go
 
@@ -78,8 +78,10 @@ momentum scrolling. Three consequences worth knowing before changing `CodeEditor
 - `drawSelection` is desktop-only. It paints its own selection over the native one, which is what
   makes multiple cursors visible and what would take the touch handles away.
 - Grammars load on demand, one chunk per language, so a Python solver never downloads the C++
-  parser. Assembly gained highlighting in the move: Monaco ships no x86 grammar and left it as
-  plaintext.
+  parser. Assembly gained highlighting in the move: Monaco ships no assembler grammar and left it
+  as plaintext. CodeMirror's `gas` mode has no AArch64 dialect either, so `languages.ts` bases it
+  on the ARMv6 one and patches in `//` comments and the x/w registers — never on the x86 one,
+  whose `#` line comment is AArch64's immediate prefix and would grey out half of every line.
 
 **Mobile** is a different layout, not the desktop one squeezed. Below `md` the page is an ordinary
 scrolling document: the editor is as tall as the solution (`autoHeight`, floored at `50dvh`), the
