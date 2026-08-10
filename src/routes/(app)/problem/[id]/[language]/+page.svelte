@@ -220,6 +220,10 @@
 			md:static md:z-auto md:w-[var(--problem-width)] md:max-w-none md:translate-x-0 md:transition-none
 			{problemOpen ? 'translate-x-0' : 'translate-x-full'}"
 	>
-		<ProblemDescription html={data.problemHtml} onclose={() => (problemOpen = false)} />
+		<ProblemDescription
+			html={data.problemHtml}
+			problemId={data.problemId}
+			onclose={() => (problemOpen = false)}
+		/>
 	</div>
 </div>

@@ -1,9 +1,13 @@
 <script lang="ts">
 	import renderMathInElement from 'katex/contrib/auto-render';
 	import 'katex/dist/katex.min.css';
-	import { X } from '@lucide/svelte';
+	import { ExternalLink, X } from '@lucide/svelte';
 
-	let { html, onclose }: { html: string; onclose?: () => void } = $props();
+	let {
+		html,
+		problemId,
+		onclose
+	}: { html: string; problemId: number; onclose?: () => void } = $props();
 
 	let container: HTMLDivElement | undefined = $state();
 
@@ -23,9 +27,16 @@
 
 <aside class="flex h-full w-full flex-col border-l border-border bg-card">
 	<div class="flex items-center justify-between border-b border-border px-4 py-3">
-		<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-			Problem
-		</span>
+		<a
+			href="https://projecteuler.net/problem={problemId}"
+			target="_blank"
+			rel="noreferrer noopener"
+			class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+			title="Open problem {problemId} on projecteuler.net"
+		>
+			Problem {problemId}
+			<ExternalLink size={12} />
+		</a>
 		{#if onclose}
 			<button
 				onclick={onclose}
