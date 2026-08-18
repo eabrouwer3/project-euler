@@ -1,6 +1,14 @@
 import type { Language } from './types.js';
 
-export const LANGUAGES: Language[] = ['python', 'typescript', 'clojure', 'rust', 'cpp', 'assembly'];
+export const LANGUAGES: Language[] = [
+	'python',
+	'typescript',
+	'ruby',
+	'clojure',
+	'rust',
+	'cpp',
+	'assembly'
+];
 
 export const BOILERPLATE: Record<Language, string> = {
 	python: `if __name__ == '__main__':
@@ -9,6 +17,8 @@ export const BOILERPLATE: Record<Language, string> = {
 	typescript: `if (import.meta.main) {
   console.log('Hello, World!')
 }
+`,
+	ruby: `puts 'Hello, World!'
 `,
 	clojure: `(println "Hello, World!")`,
 	rust: `fn main() {
@@ -49,6 +59,9 @@ _start:
 export const LANGUAGE_LABELS: Record<Language, string> = {
 	python: 'Python 3.13',
 	typescript: 'TypeScript (Bun 1)',
+	// No minor version, unlike its neighbours: the interpreter is whatever the sandbox base's
+	// Debian release packages, so pinning one here would go stale without anything failing.
+	ruby: 'Ruby 3 (MRI)',
 	clojure: 'Clojure 1.12 (Java 21)',
 	rust: 'Rust (stable)',
 	cpp: 'C++26 (GCC 16)',
@@ -58,6 +71,7 @@ export const LANGUAGE_LABELS: Record<Language, string> = {
 export const LANGUAGE_ABBR: Record<Language, string> = {
 	python: 'PY',
 	typescript: 'TS',
+	ruby: 'RB',
 	clojure: 'CLJ',
 	rust: 'RS',
 	cpp: 'C++',
@@ -71,6 +85,7 @@ export const LANGUAGE_ABBR: Record<Language, string> = {
 export const SUPPORTS_PACKAGES: Record<Language, boolean> = {
 	python: true,
 	typescript: true,
+	ruby: true,
 	clojure: true,
 	rust: true,
 	cpp: false,
@@ -89,6 +104,9 @@ export const SUPPORTS_PACKAGES: Record<Language, boolean> = {
 export const MOBILE_KEYS: Record<Language, string[]> = {
 	python: [':', '(', ')', '[', ']', '{', '}', "'", '"', '_', '=', '<', '>', '#', '%', '*', '+', '-', '/', ',', '.', '|', '&'],
 	typescript: ['(', ')', '{', '}', '[', ']', "'", '"', '`', '=', '>', '<', ';', ':', '.', ',', '&', '|', '!', '?', '+', '-', '*', '/', '%', '$', '_'],
+	// `|` and `.` lead the punctuation after the brackets: a block's parameters sit between
+	// pipes, and everything here is written as a chain of method calls.
+	ruby: ['(', ')', '{', '}', '[', ']', '|', '.', '_', ':', '"', "'", '=', '>', '<', '@', '&', '?', '!', '#', '+', '-', '*', '/', '%', ',', ';'],
 	clojure: ['(', ')', '[', ']', '{', '}', '"', '-', '>', '<', ':', '#', "'", '=', '?', '!', '*', '%', '_', '.', '/', '&'],
 	rust: ['(', ')', '{', '}', '[', ']', '<', '>', '&', ':', ';', '"', "'", '!', '?', '=', '|', '_', '.', ',', '*', '+', '-', '/', '%', '#'],
 	cpp: ['(', ')', '{', '}', '[', ']', '<', '>', '"', "'", ';', ':', '&', '*', '=', '!', '|', '+', '-', '/', '%', '#', '.', ',', '_'],
@@ -116,6 +134,10 @@ export function solutionFiles(
 			return { source: 'main.py' };
 		case 'typescript':
 			return { source: 'main.ts', manifest: 'package.json' };
+		// No manifest: gems are installed by name into the sandbox's own gem path rather than
+		// resolved from a Gemfile, the same way uv installs a Python solution's packages.
+		case 'ruby':
+			return { source: 'main.rb' };
 		case 'clojure':
 			return { source: 'main.clj', manifest: 'deps.edn' };
 		case 'rust':

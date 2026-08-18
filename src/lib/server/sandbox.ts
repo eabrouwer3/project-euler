@@ -120,7 +120,15 @@ function toolchainTemplate() {
 				// libraries present, which on this base they are not.
 				'binutils-aarch64-linux-gnu',
 				'qemu-user-static',
-				'openjdk-21-jdk-headless'
+				'openjdk-21-jdk-headless',
+				// Ruby comes from apt rather than from a version manager: rbenv and mise both
+				// build the interpreter from source, which is minutes of template build for a
+				// version nothing here pins. Whatever the base's Debian release ships is a 3.x,
+				// which is why the language's label names no minor version. `ruby-dev` is for
+				// gems with native extensions — they need mkmf and the interpreter's headers,
+				// and build-essential above supplies the compiler half.
+				'ruby',
+				'ruby-dev'
 			)
 			// C++26. The Dockerfile reached GCC 16 through an Ubuntu-only PPA that has no Debian
 			// equivalent; g++-15 is a plain package on this base and covers the standard. Installed
@@ -151,6 +159,11 @@ function toolchainTemplate() {
 			.workdir(WORKDIR)
 			.run('echo "(println 1)" > w.clj && echo "{:deps {}}" > deps.edn && clojure -M w.clj')
 			.run('echo "console.log(1)" > w.ts && bun run w.ts')
+			// Nothing to warm for Ruby — it resolves no classpath and downloads no interpreter —
+			// but rubygems rides in as part of apt's ruby rather than as a package of its own, so
+			// this asserts at build time that it did. Without it a missing `gem` would first
+			// surface as a failed install inside somebody's solve.
+			.run('ruby -e "puts 1" && gem --version')
 			.run('rm -f w.clj w.ts deps.edn')
 	);
 }

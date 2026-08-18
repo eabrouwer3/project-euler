@@ -14,6 +14,7 @@ import type { Language } from '$lib/types.js';
 export const INDENT_WIDTH: Record<Language, number> = {
 	python: 4,
 	typescript: 2,
+	ruby: 2,
 	clojure: 2,
 	rust: 4,
 	cpp: 4,
@@ -79,6 +80,23 @@ export async function languageExtension(language: Language): Promise<Extension> 
 		case 'cpp': {
 			const { cpp } = await import('@codemirror/lang-cpp');
 			return cpp();
+		}
+		case 'ruby': {
+			// Legacy mode as well: there is no lezer grammar for Ruby, and the stream parser
+			// carries the one thing highlighting it needs beyond keywords — a heredoc and a
+			// `%w[]` literal both run past the end of their line.
+			const [{ StreamLanguage }, { ruby }] = await Promise.all([
+				import('@codemirror/language'),
+				import('@codemirror/legacy-modes/mode/ruby')
+			]);
+			// The mode declares no language data at all, and toggle-comment does nothing without
+			// a comment token to insert. Ruby's block form is `=begin`/`=end` on their own lines,
+			// which is not what CodeMirror means by a block comment, so only the line form is
+			// named here.
+			return StreamLanguage.define({
+				...ruby,
+				languageData: { ...ruby.languageData, commentTokens: { line: '#' } }
+			});
 		}
 		case 'clojure': {
 			const [{ StreamLanguage }, { clojure }] = await Promise.all([
