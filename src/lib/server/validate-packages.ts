@@ -12,6 +12,13 @@ const PYTHON_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(==[A-Za-z0-9._-]+)?$/;
 /** Written into package.json's dependencies map (JSON-encoded, never shell-interpolated) — npm scoped names and semver ranges are fine. */
 const TYPESCRIPT_RE = /^(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+(@[\^~]?[A-Za-z0-9.*-]+)?$/;
 
+/**
+ * `gem install ${p}` is shell-interpolated (see run-code.ts), so this is as conservative as the
+ * Python pattern: a bare gem name or an exact `name@version` pin, whose `@` becomes RubyGems'
+ * own `name:version` form. A range would need `>=` or a comma, both of which the shell reads.
+ */
+const RUBY_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(@[A-Za-z0-9._-]+)?$/;
+
 /** The artifact/group half is spliced raw (unescaped) into deps.edn text (see server.ts), so it's restricted to identifier-safe characters to prevent edn structure injection. */
 const CLOJURE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)?(@[A-Za-z0-9._-]+)?$/;
 
@@ -22,6 +29,7 @@ const RUST_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*(@[\^~=]?[A-Za-z0-9.*-]+)?$/;
 const PACKAGE_PATTERNS: Record<Language, RegExp | null> = {
 	python: PYTHON_RE,
 	typescript: TYPESCRIPT_RE,
+	ruby: RUBY_RE,
 	clojure: CLOJURE_RE,
 	rust: RUST_RE,
 	cpp: null,

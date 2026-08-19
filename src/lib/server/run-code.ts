@@ -110,6 +110,34 @@ export async function runCode(
 					: `bun run ${source}`;
 			break;
 		}
+		case 'ruby': {
+			files[source] = code;
+			// Ruby buffers stdout whenever it is not a terminal, and a run's stdout is a pipe, so
+			// a solution stopped at the deadline would take its last few KB of progress with it.
+			// There is no environment variable for this — the interpreter's own buffer is not
+			// libc's, which is also why stdbuf (what C++ uses here) would not reach it. So the
+			// setting arrives through `-r`, out of a file of its own: prepending it to the
+			// solution would put every line of a backtrace one off from what the editor shows.
+			files['.sync.rb'] = '$stdout.sync = true\n';
+			// A gem goes in by name rather than through a Gemfile, the same shape as uv's
+			// `--with`: bundler would want a lockfile and a `bundle exec` wrapper for what is one
+			// file with no project around it. `--conservative` is what makes the second run cheap
+			// — gems stay installed in the sandbox, and this skips any already satisfied — and
+			// `--no-document` skips building rdoc for an interpreter nobody is reading docs in.
+			const install =
+				packages.length > 0
+					? `gem install --conservative --no-document ${packages
+							.map((pkg) => {
+								const { name, version } = parsePackageSpec(pkg);
+								// RubyGems spells a pinned install `name:version`; `name@version`
+								// means nothing to it.
+								return version === undefined ? name : `${name}:${version}`;
+							})
+							.join(' ')} && `
+					: '';
+			command = `${install}ruby -r./.sync.rb ${source}`;
+			break;
+		}
 		case 'clojure': {
 			files[source] = code;
 			// A project deps.edn beats CLJ_CACHE, so the classpath cache lands in ./.cpcache — per
@@ -185,7 +213,7 @@ export async function runCode(
 
 	// Sources are written exactly as given, and the editor does not necessarily leave a trailing
 	// newline. Compilers have long since stopped minding, but nothing is gained by finding out
-	// which of six toolchains still does.
+	// which of seven toolchains still does.
 	for (const [name, content] of Object.entries(files)) {
 		if (!content.endsWith('\n')) files[name] = `${content}\n`;
 	}
