@@ -9,7 +9,7 @@
     "preview": "bunx --bun vite preview",
     "db:generate": "bunx --bun drizzle-kit generate",
     "db:migrate": "bunx --bun drizzle-kit migrate",
-    "test": "bun src/lib/server/validate-packages.check.ts && bun src/lib/server/materialise-files.check.ts && bun src/lib/server/problem-resources.check.ts && bun src/lib/run-stream.check.ts"
+    "test": "bun src/lib/server/validate-packages.check.ts && bun src/lib/server/materialise-files.check.ts && bun src/lib/server/sandbox.check.ts && bun src/lib/server/problem-resources.check.ts && bun src/lib/run-stream.check.ts"
   },
   "dependencies": {
     "@auth/sveltekit": "^1.7.4",
@@ -32,7 +32,7 @@
     "katex": "^0.16.45",
     "mode-watcher": "^1.1.0",
     "postgres": "^3.4.5",
-    "railway": "^3.8.1",
+    "railway": "^3.10.0",
     "tailwind-merge": "^3.5.0",
     "tailwind-variants": "^3.2.2",
     "tailwindcss": "^4.2.2",
