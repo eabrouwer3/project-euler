@@ -23,11 +23,24 @@ import { createHash, randomBytes } from 'node:crypto';
  * and boots nowhere else — Railway rejects the attempt with `Checkpoint "…" lives in us-west2 and
  * cannot boot in us-east4-eqdc4a`. Both snapshots below are therefore pinned to this one: the
  * template build, which Railway otherwise runs in its own default region (`Sandbox.create` only
- * forwards a region to the build from SDK 3.10, and a build left in us-west2 is precisely what
- * made every run fail), and the checkpoint captured from it, whose name carries the region for
- * the same reason.
+ * forwards a region to the build from SDK 3.10), and the checkpoint captured from it, whose name
+ * carries the region because a checkpoint listing does not report one.
+ *
+ * Pinning a region only decides where a *new* build goes, though. Railway content-addresses a
+ * built template by its instructions, so an existing build in another region is handed back for
+ * the same toolchain however the region is set, and every run fails on it until it is deleted —
+ * which is why `recoverFromWrongRegion` deletes rather than merely rebuilds, and why it will in
+ * the end follow the toolchain to whichever region Railway keeps it in rather than leave the site
+ * unable to run anything at all.
  */
 const REGION = process.env.SANDBOX_REGION ?? 'us-east4-eqdc4a';
+
+/**
+ * The region sandboxes are actually created in. It is REGION until Railway proves it cannot serve
+ * the toolchain there — see `recoverFromWrongRegion`, which moves it as a last resort — and every
+ * create goes through here rather than reading REGION directly.
+ */
+let activeRegion = REGION;
 
 /**
  * A user's sandbox outlives their run so the next one skips the boot, and Railway's own idle
@@ -40,6 +53,11 @@ const REGION = process.env.SANDBOX_REGION ?? 'us-east4-eqdc4a';
  * against here: memory x wall-clock is essentially the whole cost of a sandbox.
  */
 const IDLE_MINUTES = 5;
+
+/** The knobs every sandbox is created with, in whichever region is currently working. */
+function createOptions(): { region: string; idleTimeoutMinutes: number } {
+	return { region: activeRegion, idleTimeoutMinutes: IDLE_MINUTES };
+}
 
 /**
  * Bounds work in flight against Railway, not VM count: with a sandbox per user, what counts
@@ -205,10 +223,27 @@ let checkpointPromise: Promise<string> | null = null;
  * and a second replica racing this one is harmless since capture is idempotent by name.
  */
 export function ensureCheckpoint(): Promise<string> {
-	checkpointPromise ??= (async () => {
-		requireCredentials();
-		const template = toolchainTemplate();
-		const name = checkpointName(template, REGION);
+	checkpointPromise ??= buildCheckpoint().catch((err) => {
+		// Don't cache a failure: a transient build error would otherwise poison every later run.
+		checkpointPromise = null;
+		throw err;
+	});
+
+	return checkpointPromise;
+}
+
+/**
+ * Captures the toolchain into a checkpoint this region can boot, clearing whatever stands in the
+ * way first. Loops rather than runs once because each recovery changes what the build should be
+ * named or where it should happen, and both are decided at the top; `recoverFromWrongRegion`
+ * bounds the loop by refusing to report progress twice for the same obstruction.
+ */
+async function buildCheckpoint(): Promise<string> {
+	requireCredentials();
+	const template = toolchainTemplate();
+
+	for (;;) {
+		const name = checkpointName(template, activeRegion);
 
 		const existing = await Sandbox.checkpoints();
 		if (existing.some((c) => c.key === name)) {
@@ -216,10 +251,19 @@ export function ensureCheckpoint(): Promise<string> {
 			return name;
 		}
 
-		console.log(`building sandbox checkpoint ${name} in ${REGION}…`);
-		// The region reaches the template build through this call, not just the VM booted from it:
-		// a template built elsewhere yields a checkpoint that cannot boot here at all.
-		const base = await Sandbox.create(template, { region: REGION, idleTimeoutMinutes: IDLE_MINUTES });
+		console.log(`building sandbox checkpoint ${name} in ${activeRegion}…`);
+
+		let base: Sandbox;
+		try {
+			// The region reaches the template build through this call, not just the VM booted from
+			// it: a template built elsewhere yields a checkpoint that cannot boot here at all.
+			base = await Sandbox.create(template, createOptions());
+		} catch (err) {
+			const stale = wrongRegion(err);
+			if (!stale || !(await recoverFromWrongRegion(stale))) throw err;
+			continue;
+		}
+
 		try {
 			await base.checkpoint(name);
 		} finally {
@@ -238,13 +282,7 @@ export function ensureCheckpoint(): Promise<string> {
 
 		console.log(`sandbox checkpoint ready: ${name}`);
 		return name;
-	})().catch((err) => {
-		// Don't cache a failure: a transient build error would otherwise poison every later run.
-		checkpointPromise = null;
-		throw err;
-	});
-
-	return checkpointPromise;
+	}
 }
 
 let active = 0;
@@ -433,51 +471,135 @@ function lease(userId: string): Promise<Sandbox> {
 }
 
 /**
- * True for the one failure a rebuild fixes and nothing else does: a checkpoint captured in another
- * region. Matched on the message because Railway reports it as an ordinary GraphQL error — there
- * is no code or class to test — and it is worth telling apart, since the alternative is a service
- * that has to be repaired by hand before a single solution can run again.
+ * Reads Railway's wrong-region refusal — `Checkpoint "…" lives in us-west2 and cannot boot in
+ * us-east4-eqdc4a` — back into the two things needed to act on it: which snapshot is in the way,
+ * and where it actually is. Parsed from the message because that is all there is: the SDK reports
+ * it as an ordinary GraphQL error, with no code, class or field to test.
+ *
+ * Worth telling apart from every other create failure because it is the only permanent one. A
+ * quota or a credential failure clears on its own or with a config change; this one resolves the
+ * name, finds the snapshot, and refuses every boot for every user until something deletes it.
  */
-export function isWrongRegion(err: unknown): boolean {
-	return err instanceof Error && /cannot boot in/i.test(err.message);
+export function wrongRegion(err: unknown): { checkpoint: string; region: string } | null {
+	if (!(err instanceof Error)) return null;
+
+	const match = /Checkpoint "([^"]+)" lives in ([\w-]+) and cannot boot in/i.exec(err.message);
+	return match ? { checkpoint: match[1], region: match[2] } : null;
 }
 
 /**
- * Boots a VM from the toolchain checkpoint, rebuilding it once if it turns out to live in a
- * region these sandboxes no longer run in.
- *
- * Naming the checkpoint after its region is what should keep this from happening, so reaching
- * here means something outside that scheme put a snapshot under this name — a build that landed
- * elsewhere, a checkpoint restored from another environment. The distinguishing feature of the
- * failure is that it is permanent: the name resolves, the snapshot exists, and every boot for
- * every user fails on it until it is deleted. So delete it and build again, once.
+ * Snapshots this process has already deleted in the course of a recovery, so a second failure on
+ * the same one is read as the recovery not having worked rather than retried forever.
  */
-async function boot(): Promise<Sandbox> {
-	const checkpoint = await ensureCheckpoint();
-	try {
-		return await Sandbox.create(checkpoint, { region: REGION, idleTimeoutMinutes: IDLE_MINUTES });
-	} catch (err) {
-		if (!isWrongRegion(err)) throw err;
+const discarded = new Set<string>();
 
-		console.error(`checkpoint ${checkpoint} cannot boot in ${REGION}, rebuilding it: ${err}`);
-		await discardCheckpoint(checkpoint);
-		return Sandbox.create(await ensureCheckpoint(), {
-			region: REGION,
-			idleTimeoutMinutes: IDLE_MINUTES
-		});
+/**
+ * How many snapshots one process will delete before it stops trying to clear the way. Every
+ * deletion buys a fresh toolchain build, which costs minutes, so this bounds a Railway that keeps
+ * answering with a new unbootable snapshot: at some point the region is the problem, not the
+ * snapshot, and grinding out builds is worse than the failure being treated.
+ */
+const MAX_DISCARDS = 3;
+
+/**
+ * Decides what to do about a snapshot that cannot boot here, given what has already been tried.
+ * `null` means there is nothing left to try and the original failure should stand.
+ *
+ * Two things can be in the way, in this order:
+ *
+ * 1. **A snapshot in the old region.** Railway content-addresses a built template by its
+ *    instructions alone, so a build that once ran in another region is handed back for the same
+ *    toolchain no matter which region asks — and a checkpoint boots only where it was captured.
+ *    Nothing else deletes it: it is keyed by Railway's own recipe hash rather than by our name,
+ *    so the sweep over `euler-runner-*` never sees it, and the service stays broken until it is
+ *    gone. Deleting it makes the next attempt build the toolchain here instead of reusing it.
+ * 2. **The region itself.** If the rebuild lands in the same foreign region anyway, Railway is
+ *    saying it will not put this toolchain where we asked, and the pin is a preference rather
+ *    than a correctness property — a cross-country exec costs latency, while holding out costs
+ *    every run there is. So follow the toolchain to where Railway will keep it; the next deploy
+ *    starts from the configured region again.
+ *
+ * Pure, and separate from the acting on it, because this is the part that has to terminate: each
+ * branch is available a bounded number of times, so a caller looping until it returns `null`
+ * cannot spend an unbounded number of builds.
+ */
+export function planRecovery(
+	stale: { checkpoint: string; region: string },
+	tried: { region: string; discarded: ReadonlySet<string> }
+): { delete: string } | { adopt: string } | null {
+	if (!tried.discarded.has(stale.checkpoint) && tried.discarded.size < MAX_DISCARDS) {
+		return { delete: stale.checkpoint };
+	}
+
+	if (tried.region !== stale.region) return { adopt: stale.region };
+
+	return null;
+}
+
+/**
+ * Carries out `planRecovery`, and says whether it managed to change anything — false means the
+ * caller should give up and report the failure it came in with.
+ */
+async function recoverFromWrongRegion(stale: {
+	checkpoint: string;
+	region: string;
+}): Promise<boolean> {
+	const plan = planRecovery(stale, { region: activeRegion, discarded });
+	if (plan === null) return false;
+
+	if ('delete' in plan) {
+		discarded.add(plan.delete);
+		console.error(
+			`checkpoint ${plan.delete} lives in ${stale.region} and cannot boot in ${activeRegion}; ` +
+				`deleting it so the toolchain is built here instead`
+		);
+		await deleteCheckpoint(plan.delete);
+		return true;
+	}
+
+	console.error(
+		`Railway keeps the toolchain in ${plan.adopt} despite ${activeRegion}; running sandboxes ` +
+			`there instead — set SANDBOX_REGION=${plan.adopt} to make it deliberate`
+	);
+	activeRegion = plan.adopt;
+	return true;
+}
+
+/**
+ * Deletes a checkpoint named by a failure rather than by a listing, so what is in hand may be
+ * either the key Railway printed or an id. Looked up by key first, since `deleteCheckpoint` takes
+ * an id, and attempted as an id when the listing does not have it.
+ *
+ * Best-effort: a delete that fails leaves the recovery above to fall through to its second step
+ * rather than turning one broken checkpoint into a broken run path.
+ */
+async function deleteCheckpoint(keyOrId: string): Promise<void> {
+	try {
+		const listed = (await Sandbox.checkpoints()).find((c) => c.key === keyOrId);
+		await Sandbox.deleteCheckpoint(listed?.id ?? keyOrId);
+	} catch (err) {
+		console.error(`could not delete checkpoint ${keyOrId}: ${err}`);
 	}
 }
 
 /**
- * Deletes a checkpoint and forgets the memoised build, so the next `ensureCheckpoint` captures a
- * new one rather than handing back the name that just failed. Cleared before the delete: a delete
- * that fails still has to leave the build to be retried, and capture is by name, so the worst a
- * surviving snapshot costs is the same failure again.
+ * Boots a VM from the toolchain checkpoint, clearing a wrong-region snapshot out of the way if
+ * one turns up and building again — the checkpoint's name carries its region, so a rebuild after
+ * a recovery is a different snapshot under a different name, not a retry of the same one.
  */
-async function discardCheckpoint(name: string): Promise<void> {
-	checkpointPromise = null;
-	const stale = (await Sandbox.checkpoints()).find((c) => c.key === name);
-	if (stale) await Sandbox.deleteCheckpoint(stale.id);
+async function boot(): Promise<Sandbox> {
+	for (;;) {
+		const checkpoint = await ensureCheckpoint();
+		try {
+			return await Sandbox.create(checkpoint, createOptions());
+		} catch (err) {
+			const stale = wrongRegion(err);
+			if (!stale || !(await recoverFromWrongRegion(stale))) throw err;
+			// Whatever `ensureCheckpoint` memoised was reached through the snapshot just deleted or
+			// the region just left, so it is settled again from scratch on the next pass.
+			checkpointPromise = null;
+		}
+	}
 }
 
 /** Drops a lease so the next run boots a fresh VM, destroying the old one if it still exists. */
