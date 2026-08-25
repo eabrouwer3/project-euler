@@ -106,9 +106,18 @@ function chrome(p: Palette, dark: boolean): Extension {
 				borderLeftColor: p.cursor,
 				borderLeftWidth: '2px'
 			},
-			'&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
-				backgroundColor: p.selection
-			},
+			// Spelled out in full because CodeMirror's base theme paints the selection too, and its rules
+			// are long: `&dark.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground` is
+			// six classes of specificity against the two of a bare `.cm-selectionBackground`, so a short
+			// selector here loses and the palette's colour never reaches the screen — a dark selection
+			// stayed the base theme's `#233`, a shade off the background and invisible, which is the very
+			// thing the colour above was picked to fix. Every rule below that overlaps a base-theme rule
+			// matches at least as much of the tree as that rule does.
+			//
+			// `::selection` is the native selection, which shows only on touch: `drawSelection` forces it
+			// transparent, and that extension is desktop-only.
+			'&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, & > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-content ::selection':
+				{ backgroundColor: p.selection },
 			'.cm-activeLine': { backgroundColor: p.lineHighlight },
 			'.cm-gutters': {
 				backgroundColor: p.bg,
@@ -128,7 +137,10 @@ function chrome(p: Palette, dark: boolean): Extension {
 				border: 'none',
 				color: p.comment
 			},
-			'.cm-matchingBracket, .cm-nonmatchingBracket': {
+			// `@codemirror/language` colours a matched bracket only while the editor has focus, through
+			// `&.cm-focused .cm-matchingBracket` — which outweighs the unfocused selector, so both are
+			// needed for the highlight to hold still when focus moves.
+			'.cm-matchingBracket, .cm-nonmatchingBracket, &.cm-focused .cm-matchingBracket, &.cm-focused .cm-nonmatchingBracket': {
 				backgroundColor: p.matchHighlight,
 				outline: `1px solid ${p.gutterFg}`
 			},
@@ -141,8 +153,13 @@ function chrome(p: Palette, dark: boolean): Extension {
 				borderRadius: '4px',
 				padding: '2px 6px'
 			},
-			'.cm-searchMatch': { backgroundColor: p.matchHighlight },
-			'.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: p.cursor, color: p.bg },
+			// Likewise `@codemirror/search`, whose `&dark .cm-searchMatch` would otherwise leave every hit
+			// the cyan of its own default rather than this palette's.
+			'.cm-scroller .cm-searchMatch': { backgroundColor: p.matchHighlight },
+			'.cm-scroller .cm-searchMatch.cm-searchMatch-selected': {
+				backgroundColor: p.cursor,
+				color: p.bg
+			},
 			'.cm-tooltip': {
 				backgroundColor: p.panel,
 				color: p.fg,
