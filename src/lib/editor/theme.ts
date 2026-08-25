@@ -10,6 +10,14 @@ import type { Extension } from '@codemirror/state';
 type Palette = {
 	bg: string;
 	fg: string;
+	/**
+	 * The band behind the line the cursor is on — and it **must** carry an alpha channel. It is
+	 * painted on `.cm-line`, which sits above the selection layer `drawSelection` draws into, so an
+	 * opaque colour here covers the selection on whichever line holds the cursor. That is every
+	 * selection made inside a single line, and the cursor's line of a multi-line one: selecting a
+	 * word appeared to do nothing, while dragging across lines highlighted all of them but the last.
+	 * The values below are alpha'd to render exactly their old opaque selves over `bg`.
+	 */
 	lineHighlight: string;
 	selection: string;
 	/** Other occurrences of the selected word, and search hits — never the selection itself. */
@@ -40,7 +48,7 @@ type Palette = {
 const DARK: Palette = {
 	bg: '#282c34',
 	fg: '#abb2bf',
-	lineHighlight: '#2c313c',
+	lineHighlight: '#687cb410',
 	selection: '#3b5a80',
 	matchHighlight: '#6b5628',
 	cursor: '#528bff',
@@ -63,7 +71,7 @@ const DARK: Palette = {
 const LIGHT: Palette = {
 	bg: '#fafafa',
 	fg: '#383a42',
-	lineHighlight: '#f0f0f0',
+	lineHighlight: '#5a5a5a10',
 	selection: '#9dbfe8',
 	matchHighlight: '#ecd070',
 	cursor: '#526fff',
