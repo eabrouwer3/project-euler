@@ -159,10 +159,6 @@ function toolchainTemplate() {
 				'ruby',
 				'ruby-dev'
 			)
-			// C++26. The Dockerfile reached GCC 16 through an Ubuntu-only PPA that has no Debian
-			// equivalent; g++-15 is a plain package on this base and covers the standard. Installed
-			// with an explicit step because routing it through withPackages failed in testing.
-			.run('apt-get update && apt-get install -y g++-15 && rm -rf /var/lib/apt/lists/*')
 			.withEnv({ UV_PYTHON_INSTALL_DIR: '/opt/uv/python' })
 			.run('curl -fsSL https://astral.sh/uv/install.sh | sh')
 			.run('/root/.local/bin/uv python install 3.13')
@@ -193,7 +189,15 @@ function toolchainTemplate() {
 			// this asserts at build time that it did. Without it a missing `gem` would first
 			// surface as a failed install inside somebody's solve.
 			.run('ruby -e "puts 1" && gem --version')
-			.run('rm -f w.clj w.ts deps.edn')
+			// C++26 comes from build-essential's own g++ rather than a versioned package. The
+			// Dockerfile reached GCC 16 through an Ubuntu-only PPA with no Debian equivalent, and
+			// g++-15 only ever existed in Debian unstable — installing it worked until the base
+			// moved on, and then apt simply found no such package and the step failed quietly,
+			// leaving every C++ solve to report `g++-15: command not found`. Stock g++ accepts
+			// -std=c++26 and compiles <print> and <ranges> correctly, so this asserts the standard
+			// at build time instead of discovering it inside somebody's solve.
+			.run('echo "int main() {}" > w.cpp && g++ -std=c++26 -o /dev/null w.cpp')
+			.run('rm -f w.clj w.ts w.cpp deps.edn')
 	);
 }
 

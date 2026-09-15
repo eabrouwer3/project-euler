@@ -172,8 +172,10 @@ export async function runCode(
 		}
 		case 'cpp': {
 			files[source] = code;
-			// g++-15 rather than the sandbox base's g++ 14: the old Dockerfile targeted C++26 via
-			// a GCC 16 PPA that only exists for Ubuntu, and 15 is the closest plain Debian package.
+			// The base's own g++, which accepts -std=c++26: the old Dockerfile targeted C++26 via a
+			// GCC 16 PPA that only exists for Ubuntu, and no versioned package is worth pinning to
+			// in its place — g++-15 lives in Debian unstable alone, so naming it broke C++ outright
+			// the moment the sandbox base tracked a release that had never carried it.
 			//
 			// stdbuf line-buffers the program's stdio, so a solution stopped at the deadline has
 			// already written what it printed instead of taking an unflushed 4K of it to the grave —
@@ -182,7 +184,7 @@ export async function runCode(
 			// accord, the JVM flushes each println, Bun writes through, and assembly is syscalls —
 			// which qemu passes through as they happen, so emulation adds no buffer of its own.
 			// A solution that turns off `sync_with_stdio` is buffering by hand and keeps its own.
-			command = `g++-15 -O2 -std=c++26 -o main ${source} && stdbuf -oL -eL ./main`;
+			command = `g++ -O2 -std=c++26 -o main ${source} && stdbuf -oL -eL ./main`;
 			break;
 		}
 		case 'assembly': {
