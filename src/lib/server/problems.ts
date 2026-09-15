@@ -70,6 +70,32 @@ export function resolveLinks(html: string): string {
 		);
 }
 
+/**
+ * Project Euler tells the reader to right-click a data file's link and save it — the first step
+ * of solving on your own machine, and one that has already happened here: every file a problem
+ * hands out is fetched and written into the directory the run executes in, under the name the
+ * problem's own sentence uses. Following the instruction instead downloads the file to a laptop
+ * the solution will never run on.
+ *
+ * So the parenthetical is rewritten rather than dropped. It sits at the one point in the
+ * description where the reader is looking for how to get at the file, which is exactly where
+ * they need to be told that they already have it — and "working directory" is what the strip
+ * under the editor calls the place, where the file is listed beside the solution.
+ *
+ * Both quote styles are in the wild — problem 22 writes the instruction with apostrophes,
+ * problems 81 to 83 with double quotes — so the match is on the shape of the sentence rather
+ * than on its punctuation. `[^)]` is what bounds it: each of these is a parenthetical of its
+ * own, and without it a stray "right click" elsewhere in a description could swallow the rest
+ * of the paragraph.
+ */
+const DOWNLOAD_HINT = /\s*\(\s*right[\s-]*click\b[^)]*?\bsave\b[^)]*?\bas\b[^)]*?\)/gi;
+
+const PROVIDED_HINT = ' (already saved in your working directory — no download needed)';
+
+export function localiseDownloadHints(html: string): string {
+	return html.replace(DOWNLOAD_HINT, PROVIDED_HINT);
+}
+
 function getRawProblemHtml(n: number): Promise<string> {
 	let pending = HTML_CACHE.get(n);
 	if (pending) return pending;
@@ -89,7 +115,7 @@ function getRawProblemHtml(n: number): Promise<string> {
 }
 
 export async function getProblemHtml(n: number): Promise<string> {
-	return resolveLinks(await getRawProblemHtml(n));
+	return localiseDownloadHints(resolveLinks(await getRawProblemHtml(n)));
 }
 
 const DOCUMENT_LINK = /<a\s+href="(resources\/documents\/[^"]+)"[^>]*>([^<]*)<\/a>/gi;
