@@ -10,6 +10,15 @@ import type { Extension } from '@codemirror/state';
 type Palette = {
 	bg: string;
 	fg: string;
+	/**
+	 * Painted over the selection, so it has to be translucent. CodeMirror draws the selection into
+	 * a layer at `z-index: -1` — behind `.cm-content` — while `.cm-activeLine` is a background on
+	 * the line box itself, so an opaque colour here hides the selection on whichever line the
+	 * cursor sits on. That is every single-line selection there is: selecting a word or a call
+	 * left nothing visible at all, and a selection dragged across lines showed on all of them
+	 * except the one it ended on. Each value below is an overlay whose result over `bg` is the
+	 * flat colour this used to be.
+	 */
 	lineHighlight: string;
 	selection: string;
 	/** Other occurrences of the selected word, and search hits — never the selection itself. */
@@ -40,7 +49,8 @@ type Palette = {
 const DARK: Palette = {
 	bg: '#282c34',
 	fg: '#abb2bf',
-	lineHighlight: '#2c313c',
+	// #6699ff at 4%, which lands back on the #2c313c this was.
+	lineHighlight: '#6699ff0b',
 	selection: '#3b5a80',
 	matchHighlight: '#6b5628',
 	cursor: '#528bff',
@@ -63,7 +73,8 @@ const DARK: Palette = {
 const LIGHT: Palette = {
 	bg: '#fafafa',
 	fg: '#383a42',
-	lineHighlight: '#f0f0f0',
+	// Black at 4%, which lands back on the #f0f0f0 this was.
+	lineHighlight: '#0000000a',
 	selection: '#9dbfe8',
 	matchHighlight: '#ecd070',
 	cursor: '#526fff',

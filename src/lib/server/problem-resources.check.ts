@@ -7,7 +7,13 @@
  * The fixtures are the real `minimal=` bodies, trimmed — the format is the input under test.
  */
 import assert from 'node:assert';
-import { getProblemAttachments, getProblemHtml, parseAttachments, resolveLinks } from './problems.ts';
+import {
+	getProblemAttachments,
+	getProblemHtml,
+	localiseDownloadHints,
+	parseAttachments,
+	resolveLinks
+} from './problems.ts';
 
 // --- relative URLs --------------------------------------------------------------------------
 
@@ -35,6 +41,30 @@ assert.match(
 	resolveLinks('<a href="about=roman_numerals">About</a>'),
 	/<a target="_blank" rel="noopener noreferrer" href="https:\/\/projecteuler\.net\/about=roman_numerals">/
 );
+
+// --- download instructions ------------------------------------------------------------------
+
+// Problem 22, apostrophes. The instruction is for someone fetching the file onto their own
+// machine; here the run already has it, so the sentence has to say so instead.
+assert.equal(
+	localiseDownloadHints(
+		`<p>Using <a href="...">names.txt</a> (right click and 'Save Link/Target As...'), a 46K text file</p>`
+	),
+	'<p>Using <a href="...">names.txt</a> (already saved in your working directory — no download needed), a 46K text file</p>'
+);
+
+// Problems 81 to 83 write the same instruction with double quotes.
+assert.doesNotMatch(
+	localiseDownloadHints(
+		`<p><a href="...">matrix.txt</a> (right click and "Save Link/Target As..."), a 31K text file</p>`
+	),
+	/right click/
+);
+
+// The rewrite stops at the bracket it opened: a parenthetical that merely mentions a click is
+// left alone, and nothing beyond one is ever swallowed.
+const untouched = '<p>(right click to zoom) and then (save as much work as you can)</p>';
+assert.equal(localiseDownloadHints(untouched), untouched);
 
 // --- data files -----------------------------------------------------------------------------
 
